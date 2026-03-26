@@ -76,13 +76,4 @@ output/main.exe            - 可执行文件
 - `p/n` - 上一题/下一题
 - `0` - 提前离场(满分时)
 
-## GUI建议
-
-**推荐: ImGui** - 轻量级、跨平台、单头文件
-
-```cpp
-// 集成步骤:
-// 1. 添加 imgui.h
-// 2. std::cout → ImGui::Text
-// 3. std::cin → ImGui::Button/InputInt
-```
+> 声明：所有代码由OpenClaw代理生成，使用GLM5，可能有误。欢迎反馈各种Bug，欢迎提Issue和PR！
