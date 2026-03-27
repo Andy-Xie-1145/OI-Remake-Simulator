@@ -1,0 +1,23 @@
+{
+	"files.associations": {
+		"deque": "cpp",
+		"string": "cpp",
+		"vector": "cpp",
+		"iostream": "cpp",
+		"tuple": "cpp"
+	},
+	"editor.insertSpaces": false, // 保留你的原始设置
+	// ===== 新增的格式化配置 =====
+	// 保存时自动格式化
+	"editor.formatOnSave": true,
+	// 粘贴时格式化
+	"editor.formatOnPaste": true,
+	// 输入时格式化（可选，根据性能考虑）
+	"editor.formatOnType": true,
+	// Tab大小
+	"editor.tabSize": 4,
+	// 使用Tab进行补全
+	"editor.tabCompletion": "on",
+	// 检测缩进（保持现有设置）
+	"editor.detectIndentation": false,
+}
