@@ -1,10 +1,8 @@
-# OI 重开模拟器 GUI 版本
+# OI 重开模拟器 v0.1.0-gui
 
 > 🎮 人生重开模拟器的 OI 竞赛版本 —— 体验一名 OIer 的完整竞赛生涯
 
-**版本：v0.1.0-gui-beta**
-
-基于 Dear ImGui 的图形界面版本。
+基于 Dear ImGui 的图形界面版本。原项目 [Little09qwq/oi-remake-game](https://github.com/Little09qwq/oi-remake-game)
 
 ## 功能特性
 
@@ -28,13 +26,7 @@
 1. 双击运行 `build.bat`
 2. 脚本会自动找到 Visual Studio 并编译
 
-### 方法二：使用 Visual Studio 命令行
-
-1. 打开 "x64 Native Tools Command Prompt for VS 2022"
-2. 进入项目目录
-3. 运行 `build.bat`
-
-### 方法三：使用 CMake
+### 方法二：使用 CMake
 
 ```bash
 mkdir build
@@ -65,7 +57,7 @@ cmake --build . --config Release
 | `game.hpp` | 游戏逻辑 |
 | `imgui/` | ImGui 库 |
 | `build.bat` | 编译脚本 |
-| `compile.bat` | 简化编译脚本 |
+| `CMakeLists.txt` | CMake 构建配置 |
 
 ## 许可证
 
@@ -77,4 +69,4 @@ cmake --build . --config Release
 
 ---
 
-⚠️ 本项目由 AI 辅助生成，欢迎提 Issue 和 PR！
+> ⚠️ 本项目由 AI 辅助生成，欢迎提 Issue 和 PR！

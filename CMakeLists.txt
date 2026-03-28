@@ -4,12 +4,16 @@ project(OI_Simulator_GUI)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Windows specific
 if(WIN32)
     add_definitions(-DUNICODE -D_UNICODE)
 endif()
 
-# ImGui source files
+if(MSVC)
+    add_compile_options(/utf-8)
+else()
+    add_compile_options(-finput-charset=UTF-8 -fexec-charset=UTF-8)
+endif()
+
 set(IMGUI_SOURCES
     imgui/imgui.cpp
     imgui/imgui_draw.cpp
@@ -19,27 +23,19 @@ set(IMGUI_SOURCES
     imgui/backends/imgui_impl_dx11.cpp
 )
 
-# Game source files
-set(GAME_SOURCES
+add_executable(oi_simulator_gui WIN32
     main.cpp
+    ${IMGUI_SOURCES}
 )
 
-# Include directories
-include_directories(
+target_include_directories(oi_simulator_gui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends
 )
 
-# Create executable
-add_executable(oi_simulator_gui WIN32 ${GAME_SOURCES} ${IMGUI_SOURCES})
+target_link_libraries(oi_simulator_gui PRIVATE d3d11 d3dcompiler dxgi)
 
-# Link libraries for Windows
-if(WIN32)
-    target_link_libraries(oi_simulator_gui d3d11 d3dcompiler dxgi)
-endif()
-
-# Output directory
 set_target_properties(oi_simulator_gui PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/output
 )
