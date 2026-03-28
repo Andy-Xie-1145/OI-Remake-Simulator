@@ -1,5 +1,5 @@
-// OI 重开模拟器 GUI 版本
-// 使用 Dear ImGui + Win32 + DirectX11
+// OI Simulator GUI Version
+// Using Dear ImGui + Win32 + DirectX11
 
 #include "imgui.h"
 #include "imgui_impl_win32.h"
@@ -11,7 +11,7 @@
 #include <random>
 #include <map>
 
-// 简化版类型定义（避免依赖复杂头文件）
+// Simplified type definitions
 inline const int MOOD_LIMIT = 12;
 
 struct PlayerStats {
@@ -31,8 +31,8 @@ inline const ContestInfo contests[] = {
     {"CSP-S", 4, 240},
     {"NOIP", 4, 270},
     {"WC", 3, 300},
-    {"省选Day1", 3, 270},
-    {"省选Day2", 3, 270},
+    {"Provincial Day1", 3, 270},
+    {"Provincial Day2", 3, 270},
     {"APIO", 3, 300},
     {"NOI Day1", 3, 300},
     {"NOI Day2", 3, 300},
@@ -46,13 +46,13 @@ inline const ContestInfo contests[] = {
     {"IOI", 3, 300}
 };
 
-// DirectX11 全局变量
+// DirectX11 globals
 static ID3D11Device*            g_pd3dDevice = nullptr;
 static ID3D11DeviceContext*     g_pd3dDeviceContext = nullptr;
 static IDXGISwapChain*          g_pSwapChain = nullptr;
 static ID3D11RenderTargetView*  g_mainRenderTargetView = nullptr;
 
-// 游戏状态
+// Game state
 enum class GamePhase {
     MainMenu,
     DifficultySelect,
@@ -78,13 +78,11 @@ struct GameState {
     std::map<std::string, int> purchasedItems;
     std::mt19937 rng{std::random_device{}()};
     
-    // 比赛状态
     std::vector<int> problemScores;
     std::vector<bool> problemSubmitted;
     int contestTimeLeft = 0;
-    int currentAction = 0; // 0=思考, 1=写代码, 2=对拍
+    int currentAction = 0;
     
-    // 训练事件选择
     std::vector<std::string> trainingEventOptions;
     int selectedTrainingOption = 0;
     
@@ -96,14 +94,13 @@ struct GameState {
 
 static GameState game;
 
-// 前向声明
+// Forward declarations
 bool CreateDeviceD3D(HWND hWnd);
 void CleanupDeviceD3D();
 void CreateRenderTarget();
 void CleanupRenderTarget();
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-// GUI 渲染函数
 void RenderMainMenu();
 void RenderDifficultySelect();
 void RenderTalentAllocation();
@@ -114,7 +111,6 @@ void RenderShop();
 void RenderGameOver();
 void RenderVictory();
 
-// 游戏逻辑函数
 void StartNewGame();
 void ProcessTraining();
 void ProcessEvent();
@@ -124,7 +120,7 @@ void ProcessContestTurn();
 void EndContest();
 int CalculateContestScore();
 
-// 主函数
+// Main function
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     WNDCLASSEXW wc = {
         sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L,
@@ -134,7 +130,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     RegisterClassExW(&wc);
     
     HWND hwnd = CreateWindowW(
-        wc.lpszClassName, L"OI 重开模拟器 v0.1.0-gui-beta",
+        wc.lpszClassName, L"OI Simulator v0.1.0-gui-beta",
         WS_OVERLAPPEDWINDOW, 100, 100, 1280, 720,
         nullptr, nullptr, wc.hInstance, nullptr
     );
@@ -152,6 +148,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    
+    // Load Chinese font (Microsoft YaHei)
+    ImFont* font = io.Fonts->AddFontFromFileTTF("C:/Windows/Fonts/msyh.ttc", 18.0f, nullptr, io.Fonts->GetGlyphRangesChineseFull());
+    if (font) {
+        io.FontDefault = font;
+    }
     
     ImGui::StyleColorsDark();
     ImGui_ImplWin32_Init(hwnd);
@@ -172,42 +174,23 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
         
-        // 渲染游戏界面
         {
             ImGui::SetNextWindowPos(ImVec2(0, 0));
             ImGui::SetNextWindowSize(io.DisplaySize);
-            ImGui::Begin("OI 重开模拟器", nullptr,
+            ImGui::Begin("OI Simulator", nullptr,
                 ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | 
                 ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
             
             switch (game.phase) {
-                case GamePhase::MainMenu:
-                    RenderMainMenu();
-                    break;
-                case GamePhase::DifficultySelect:
-                    RenderDifficultySelect();
-                    break;
-                case GamePhase::TalentAllocation:
-                    RenderTalentAllocation();
-                    break;
-                case GamePhase::Training:
-                    RenderTraining();
-                    break;
-                case GamePhase::Contest:
-                    RenderContest();
-                    break;
-                case GamePhase::Event:
-                    RenderEvent();
-                    break;
-                case GamePhase::Shop:
-                    RenderShop();
-                    break;
-                case GamePhase::GameOver:
-                    RenderGameOver();
-                    break;
-                case GamePhase::Victory:
-                    RenderVictory();
-                    break;
+                case GamePhase::MainMenu: RenderMainMenu(); break;
+                case GamePhase::DifficultySelect: RenderDifficultySelect(); break;
+                case GamePhase::TalentAllocation: RenderTalentAllocation(); break;
+                case GamePhase::Training: RenderTraining(); break;
+                case GamePhase::Contest: RenderContest(); break;
+                case GamePhase::Event: RenderEvent(); break;
+                case GamePhase::Shop: RenderShop(); break;
+                case GamePhase::GameOver: RenderGameOver(); break;
+                case GamePhase::Victory: RenderVictory(); break;
             }
             
             ImGui::End();
@@ -215,10 +198,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         
         ImGui::Render();
         const float clear_color_with_alpha[4] = {
-            clear_color.x * clear_color.w,
-            clear_color.y * clear_color.w,
-            clear_color.z * clear_color.w,
-            clear_color.w
+            clear_color.x * clear_color.w, clear_color.y * clear_color.w,
+            clear_color.z * clear_color.w, clear_color.w
         };
         g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, nullptr);
         g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clear_color_with_alpha);
@@ -238,7 +219,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     return 0;
 }
 
-// GUI 渲染函数实现
 void RenderMainMenu() {
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetCursorPosY(center.y - 100);
@@ -246,17 +226,15 @@ void RenderMainMenu() {
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.4f, 0.8f, 1.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(20, 15));
     
-    if (ImGui::Button("🎮 开始游戏", ImVec2(200, 50))) {
+    if (ImGui::Button("Start Game", ImVec2(200, 50))) {
         game.phase = GamePhase::DifficultySelect;
     }
     
     ImGui::SetCursorPosY(center.y - 30);
-    if (ImGui::Button("📖 游戏说明", ImVec2(200, 50))) {
-        // 显示游戏说明
-    }
+    if (ImGui::Button("How to Play", ImVec2(200, 50))) {}
     
     ImGui::SetCursorPosY(center.y + 40);
-    if (ImGui::Button("🚪 退出游戏", ImVec2(200, 50))) {
+    if (ImGui::Button("Exit", ImVec2(200, 50))) {
         PostQuitMessage(0);
     }
     
@@ -264,22 +242,22 @@ void RenderMainMenu() {
     ImGui::PopStyleColor();
     
     ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 50);
-    ImGui::Text("OI 重开模拟器 v0.1.0-gui-beta");
-    ImGui::SameLine(ImGui::GetWindowWidth() - 200);
-    ImGui::Text("AI 辅助生成");
+    ImGui::Text("OI Simulator v0.1.0-gui-beta");
+    ImGui::SameLine(ImGui::GetWindowWidth() - 150);
+    ImGui::Text("AI assisted");
 }
 
 void RenderDifficultySelect() {
-    ImGui::Text("选择难度");
+    ImGui::Text("Select Difficulty");
     ImGui::Separator();
     ImGui::Spacing();
     
-    const char* difficulties[] = {"简单", "普通", "困难", "专家"};
+    const char* difficulties[] = {"Easy", "Normal", "Hard", "Expert"};
     const char* descriptions[] = {
-        "适合新手，能力值上限提高",
-        "标准难度，平衡体验",
-        "有一定挑战性",
-        "硬核难度，只有强者才能通关"
+        "For beginners, higher stat caps",
+        "Standard difficulty, balanced experience",
+        "Challenging gameplay",
+        "Hardcore mode, only for the best"
     };
     
     for (int i = 0; i < 4; i++) {
@@ -292,23 +270,23 @@ void RenderDifficultySelect() {
         ImGui::Spacing();
     }
     
-    if (ImGui::Button("返回主菜单", ImVec2(120, 30))) {
+    if (ImGui::Button("Back", ImVec2(120, 30))) {
         game.phase = GamePhase::MainMenu;
     }
 }
 
 void RenderTalentAllocation() {
-    ImGui::Text("天赋点分配");
-    ImGui::Text("剩余天赋点: %d", game.talentPoints);
+    ImGui::Text("Talent Points Allocation");
+    ImGui::Text("Remaining Points: %d", game.talentPoints);
     ImGui::Separator();
     ImGui::Spacing();
     
     struct { const char* name; int* value; const char* desc; } talents[] = {
-        {"动态规划", &game.player.dp, "影响DP题目的能力"},
-        {"数据结构", &game.player.ds, "影响DS题目的能力"},
-        {"字符串", &game.player.string, "影响字符串题目的能力"},
-        {"图论", &game.player.graph, "影响图论题目的能力"},
-        {"组合计数", &game.player.combinatorics, "影响组合计数题目的能力"}
+        {"DP", &game.player.dp, "Dynamic Programming"},
+        {"DS", &game.player.ds, "Data Structures"},
+        {"String", &game.player.string, "String algorithms"},
+        {"Graph", &game.player.graph, "Graph theory"},
+        {"Combinatorics", &game.player.combinatorics, "Counting problems"}
     };
     
     for (auto& t : talents) {
@@ -336,48 +314,46 @@ void RenderTalentAllocation() {
     ImGui::Spacing();
     
     if (game.talentPoints == 0) {
-        if (ImGui::Button("开始游戏!", ImVec2(200, 40))) {
+        if (ImGui::Button("Start Game!", ImVec2(200, 40))) {
             game.phase = GamePhase::Training;
             ProcessTraining();
         }
     } else {
-        ImGui::TextDisabled("请分配完所有天赋点");
+        ImGui::TextDisabled("Please allocate all talent points");
     }
 }
 
 void RenderTraining() {
-    ImGui::Text("当前状态");
+    ImGui::Text("Current Status");
     ImGui::Separator();
     
-    // 显示属性
     ImGui::Columns(2, "stats", false);
-    ImGui::Text("动态规划: %d", game.player.dp);
+    ImGui::Text("DP: %d", game.player.dp);
     ImGui::NextColumn();
-    ImGui::Text("数据结构: %d", game.player.ds);
+    ImGui::Text("DS: %d", game.player.ds);
     ImGui::NextColumn();
-    ImGui::Text("字符串: %d", game.player.string);
+    ImGui::Text("String: %d", game.player.string);
     ImGui::NextColumn();
-    ImGui::Text("图论: %d", game.player.graph);
+    ImGui::Text("Graph: %d", game.player.graph);
     ImGui::NextColumn();
-    ImGui::Text("组合计数: %d", game.player.combinatorics);
+    ImGui::Text("Combinatorics: %d", game.player.combinatorics);
     ImGui::NextColumn();
-    ImGui::Text("文化课: %d", game.player.culture);
+    ImGui::Text("Culture: %d", game.player.culture);
     ImGui::Columns(1);
     
     ImGui::Spacing();
-    ImGui::Text("心态: %d/%d", game.player.determination, MOOD_LIMIT);
-    ImGui::Text("决心: %d", game.player.determination);
+    ImGui::Text("Mood: %d/%d", game.player.mood, MOOD_LIMIT);
+    ImGui::Text("Determination: %d", game.player.determination);
     
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
     
-    // 显示事件
     ImGui::TextWrapped("%s", game.currentEvent.c_str());
     ImGui::TextWrapped("%s", game.eventDescription.c_str());
     
     ImGui::Spacing();
-    ImGui::Text("请选择:");
+    ImGui::Text("Choose:");
     for (size_t i = 0; i < game.trainingEventOptions.size(); i++) {
         if (ImGui::Button(game.trainingEventOptions[i].c_str(), ImVec2(400, 30))) {
             game.selectedTrainingOption = i;
@@ -388,55 +364,51 @@ void RenderTraining() {
 
 void RenderContest() {
     ImGui::Text("%s", contests[game.currentContestIndex].name.c_str());
-    ImGui::Text("剩余时间: %d 分钟", game.contestTimeLeft);
+    ImGui::Text("Time Left: %d min", game.contestTimeLeft);
     ImGui::Separator();
     
-    // 显示题目列表
-    ImGui::Text("题目列表:");
+    ImGui::Text("Problems:");
     for (int i = 0; i < contests[game.currentContestIndex].problemCount; i++) {
         bool selected = (i == game.selectedProblem);
         char probName[16];
-        sprintf(probName, "题目 %c", 'A' + i);
+        sprintf(probName, "Problem %c", 'A' + i);
         if (ImGui::Selectable(probName, selected)) {
             game.selectedProblem = i;
         }
         
-        // 显示得分
         if (i < (int)game.problemScores.size()) {
             ImGui::SameLine();
-            ImGui::Text("[%d分]", game.problemScores[i]);
+            ImGui::Text("[%d pts]", game.problemScores[i]);
         }
     }
     
     ImGui::Spacing();
     ImGui::Separator();
     
-    // 显示当前题目信息
     char probName[16];
-    sprintf(probName, "题目 %c", 'A' + game.selectedProblem);
-    ImGui::Text("题目: %s", probName);
-    ImGui::Text("难度: %d", (game.currentContestIndex + 1) * 10 + game.selectedProblem * 5);
+    sprintf(probName, "Problem %c", 'A' + game.selectedProblem);
+    ImGui::Text("Current: %s", probName);
+    ImGui::Text("Difficulty: %d", (game.currentContestIndex + 1) * 10 + game.selectedProblem * 5);
     
     ImGui::Spacing();
     
-    // 操作按钮
-    if (ImGui::Button("思考 (消耗时间)", ImVec2(150, 30))) {
+    if (ImGui::Button("Think", ImVec2(100, 30))) {
         game.currentAction = 0;
         ProcessContestTurn();
     }
     ImGui::SameLine();
-    if (ImGui::Button("写代码", ImVec2(100, 30))) {
+    if (ImGui::Button("Code", ImVec2(100, 30))) {
         game.currentAction = 1;
         ProcessContestTurn();
     }
     ImGui::SameLine();
-    if (ImGui::Button("对拍", ImVec2(100, 30))) {
+    if (ImGui::Button("Test", ImVec2(100, 30))) {
         game.currentAction = 2;
         ProcessContestTurn();
     }
     
     ImGui::Spacing();
-    if (ImGui::Button("提前离场", ImVec2(120, 30))) {
+    if (ImGui::Button("Leave Early", ImVec2(120, 30))) {
         EndContest();
     }
 }
@@ -456,61 +428,60 @@ void RenderEvent() {
 }
 
 void RenderShop() {
-    ImGui::Text("决心商店");
-    ImGui::Text("你的决心: %d", game.player.determination);
+    ImGui::Text("Determination Shop");
+    ImGui::Text("Your Determination: %d", game.player.determination);
     ImGui::Separator();
     
     struct { const char* name; int cost; const char* effect; } items[] = {
-        {"思维提升", 300, "思维+2"},
-        {"代码提升", 300, "代码+2"},
-        {"细心提升", 300, "细心+2"},
-        {"随机提升", 300, "随机算法+1"},
-        {"心态恢复", 500, "心态+2"},
-        {"全面提升", 1000, "所有算法+1"},
-        {"速度提升", 1500, "迅捷+1"},
-        {"心理素质提升", 1500, "心理素质+1"}
+        {"Thinking +2", 300, "Improve thinking"},
+        {"Coding +2", 300, "Improve coding"},
+        {"Carefulness +2", 300, "Be more careful"},
+        {"Random +1", 300, "Random skill up"},
+        {"Mood +2", 500, "Restore mood"},
+        {"All +1", 1000, "All skills up"},
+        {"Speed +1", 1500, "Be faster"},
+        {"Mental +1", 1500, "Better psychology"}
     };
     
     for (int i = 0; i < 8; i++) {
-        if (ImGui::Button(items[i].name, ImVec2(200, 30))) {
+        if (ImGui::Button(items[i].name, ImVec2(150, 30))) {
             ProcessShop(i);
         }
         ImGui::SameLine();
-        ImGui::Text("花费: %d | %s", items[i].cost, items[i].effect);
+        ImGui::Text("Cost: %d | %s", items[i].cost, items[i].effect);
     }
     
     ImGui::Spacing();
-    if (ImGui::Button("离开商店", ImVec2(120, 30))) {
+    if (ImGui::Button("Leave Shop", ImVec2(120, 30))) {
         game.phase = GamePhase::Training;
         ProcessTraining();
     }
 }
 
 void RenderGameOver() {
-    ImGui::Text("游戏结束");
+    ImGui::Text("Game Over");
     ImGui::Separator();
-    ImGui::TextWrapped("你的 OI 生涯已经结束...");
+    ImGui::TextWrapped("Your OI career has ended...");
     
     ImGui::Spacing();
-    if (ImGui::Button("重新开始", ImVec2(150, 40))) {
+    if (ImGui::Button("Try Again", ImVec2(150, 40))) {
         game.reset();
         game.phase = GamePhase::MainMenu;
     }
 }
 
 void RenderVictory() {
-    ImGui::Text("🎉 恭喜通关!");
+    ImGui::Text("Congratulations!");
     ImGui::Separator();
-    ImGui::Text("你已经完成了整个 OI 赛季!");
+    ImGui::Text("You have completed the entire OI season!");
     
     ImGui::Spacing();
-    if (ImGui::Button("再来一次", ImVec2(150, 40))) {
+    if (ImGui::Button("Play Again", ImVec2(150, 40))) {
         game.reset();
         game.phase = GamePhase::MainMenu;
     }
 }
 
-// 游戏逻辑函数实现
 void StartNewGame() {
     game.player = PlayerStats{};
     game.talentPoints = 5 + game.difficulty;
@@ -518,9 +489,8 @@ void StartNewGame() {
 }
 
 void ProcessTraining() {
-    // 简化版训练逻辑
-    std::vector<std::string> events = {"偷学", "休息", "打隔膜", "摸鱼", "出游", 
-                                         "长期训练", "提升训练", "比赛训练"};
+    std::vector<std::string> events = {"Study", "Rest", "Practice", "Relax", "Travel", 
+                                         "Long Training", "Intensive Training", "Contest Practice"};
     
     game.trainingEventOptions.clear();
     for (int i = 0; i < 3; i++) {
@@ -528,17 +498,15 @@ void ProcessTraining() {
         game.trainingEventOptions.push_back(events[idx]);
     }
     
-    game.currentEvent = "训练时间";
-    game.eventDescription = "选择你要做的事情...";
+    game.currentEvent = "Training Time";
+    game.eventDescription = "Choose what to do...";
 }
 
 void ProcessEvent() {
-    // 处理事件结果
-    int effect = game.rng() % 3 - 1; // -1, 0, 1
-    game.player.determination += effect * 100;
-    game.player.determination = std::max(0, std::min(MOOD_LIMIT, game.player.determination));
+    int effect = game.rng() % 3 - 1;
+    game.player.mood += effect;
+    game.player.mood = std::max(0, std::min(MOOD_LIMIT, game.player.mood));
     
-    // 进入下一阶段
     if (game.rng() % 10 == 0) {
         game.phase = GamePhase::Contest;
         StartContest();
@@ -548,7 +516,6 @@ void ProcessEvent() {
 }
 
 void ProcessShop(int itemIndex) {
-    // 简化版商店逻辑
     int costs[] = {300, 300, 300, 300, 500, 1000, 1500, 1500};
     
     if (game.player.determination >= costs[itemIndex]) {
@@ -558,7 +525,7 @@ void ProcessShop(int itemIndex) {
             case 0: game.player.thinking += 2; break;
             case 1: game.player.coding += 2; break;
             case 2: game.player.carefulness += 2; break;
-            case 4: game.player.determination = std::min(MOOD_LIMIT, game.player.determination + 2); break;
+            case 4: game.player.mood = std::min(MOOD_LIMIT, game.player.mood + 2); break;
             case 5:
                 game.player.dp++; game.player.ds++; game.player.string++;
                 game.player.graph++; game.player.combinatorics++;
@@ -589,14 +556,11 @@ void ProcessContestTurn() {
         return;
     }
     
-    // 简化版比赛逻辑
     int score = game.rng() % 100;
     game.problemScores[game.selectedProblem] = std::max(game.problemScores[game.selectedProblem], score);
 }
 
 void EndContest() {
-    int totalScore = CalculateContestScore();
-    
     game.currentContestIndex++;
     
     if (game.currentContestIndex >= 16) {
@@ -609,13 +573,10 @@ void EndContest() {
 
 int CalculateContestScore() {
     int total = 0;
-    for (int s : game.problemScores) {
-        total += s;
-    }
+    for (int s : game.problemScores) total += s;
     return total;
 }
 
-// DirectX11 初始化
 bool CreateDeviceD3D(HWND hWnd) {
     DXGI_SWAP_CHAIN_DESC sd = {};
     sd.BufferCount = 2;
