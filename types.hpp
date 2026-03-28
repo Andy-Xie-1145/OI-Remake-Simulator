@@ -6,6 +6,9 @@
 #include <vector>
 #include <random>
 #include <map>
+#include <iostream>
+#include <limits>
+#include <cstdlib>
 
 // ========== 核心常量（完全复制原版） ==========
 inline const int MOOD_LIMIT = 12;  // 心态上限
@@ -217,6 +220,42 @@ namespace Utils {
     inline bool randomBool(double probability) {
         std::bernoulli_distribution dis(probability);
         return dis(gen);
+    }
+
+    inline int readIntInRange(int minValue, int maxValue) {
+        int value;
+        while (true) {
+            if (std::cin >> value && value >= minValue && value <= maxValue) {
+                return value;
+            }
+
+            if (std::cin.eof()) {
+                std::cout << "\n检测到输入结束，游戏退出。\n";
+                std::exit(0);
+            }
+
+            std::cin.clear();
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            std::cout << "输入无效，请输入 " << minValue << " 到 " << maxValue << " 之间的整数: ";
+        }
+    }
+
+    inline std::string readToken() {
+        std::string value;
+        while (true) {
+            if (std::cin >> value) {
+                return value;
+            }
+
+            if (std::cin.eof()) {
+                std::cout << "\n检测到输入结束，游戏退出。\n";
+                std::exit(0);
+            }
+
+            std::cin.clear();
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            std::cout << "输入无效，请重新输入: ";
+        }
     }
     
     inline std::string getStatName(const std::string& key) {
