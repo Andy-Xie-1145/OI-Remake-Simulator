@@ -17,13 +17,31 @@
 
 ## 编译方法
 
-详见 [BUILD.md](BUILD.md)
+### 前置要求
 
-### 快速编译 (Windows + Visual Studio)
+- Visual Studio 2019 或更高版本（需要 C++ 开发工具）
+- Windows SDK
+- DirectX 11（Windows 自带）
+
+### 方法一：使用 build.bat（推荐）
+
+1. 双击运行 `build.bat`
+2. 脚本会自动找到 Visual Studio 并编译
+
+### 方法二：使用 Visual Studio 命令行
 
 1. 打开 "x64 Native Tools Command Prompt for VS 2022"
 2. 进入项目目录
-3. 运行 `compile.bat`
+3. 运行 `build.bat`
+
+### 方法三：使用 CMake
+
+```bash
+mkdir build
+cd build
+cmake ..
+cmake --build . --config Release
+```
 
 ## 运行
 
@@ -46,6 +64,8 @@
 | `training_events_data.hpp` | 训练事件数据 |
 | `game.hpp` | 游戏逻辑 |
 | `imgui/` | ImGui 库 |
+| `build.bat` | 编译脚本 |
+| `compile.bat` | 简化编译脚本 |
 
 ## 许可证
 
