@@ -1,0 +1,14 @@
+OI 重开模拟器 GUI 版本
+Copyright 2026 Andy-Xie-1145
+
+本产品包含以下第三方软件：
+
+1. Dear ImGui
+   Copyright (c) 2014-2025 Omar Cornut
+   许可证: MIT License
+   https://github.com/ocornut/imgui
+
+2. 原版 oi-remake-game
+   Copyright (c) Little09qwq
+   许可证: MIT License
+   https://github.com/Little09qwq/oi-remake-game
