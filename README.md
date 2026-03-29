@@ -67,7 +67,7 @@ cmake --build . --config Release
 
 ## 许可证
 
-本项目基于 [Little09qwq/oi-remake-game](https://github.com/Little09qwq/oi-remake-game) 复刻开发。
+本项目基于 [Little09qwq/oi-remake-game](https://github.com/Little09qwq/oi-remake-game) 复刻开发，并在其基础上持续维护和扩展新内容（如经验系统、模糊机制等）。
 
 原项目采用 **MIT 许可证**，版权归属 Little09qwq。
 
