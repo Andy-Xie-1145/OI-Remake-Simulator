@@ -17,11 +17,10 @@
 
 ### 前置要求
 
-- Visual Studio 2019 或更高版本（需要 C++ 开发工具）
-- Windows SDK
+- Windows 系统
 - DirectX 11（Windows 自带）
 
-### 方法一：使用 build.bat（推荐）
+### 方法一：使用 build.bat（Visual Studio，推荐）
 
 1. 双击运行 `build.bat`
 2. 脚本会自动找到 Visual Studio 并编译
