@@ -26,7 +26,12 @@
 1. 双击运行 `build.bat`
 2. 脚本会自动找到 Visual Studio 并编译
 
-### 方法二：使用 CMake
+### 方法二：使用 build_mingw.bat（MinGW-w64）
+
+1. 确保已安装 [MinGW-w64](https://github.com/niXman/mingw-builds-binaries/releases)（或通过 MSYS2：`pacman -S mingw-w64-x86_64-gcc`）
+2. 双击运行 `build_mingw.bat`
+
+### 方法三：使用 CMake
 
 ```bash
 mkdir build
@@ -37,7 +42,9 @@ cmake --build . --config Release
 
 ## 运行
 
-编译成功后，运行 `output/oi_simulator_gui.exe`
+> 💡 **推荐直接下载**：前往 [Releases](https://github.com/Andy-Xie-1145/OI-Remake-Simulator/releases/latest) 下载最新版本的 exe，开箱即用。
+
+如需手动编译，编译成功后运行 `output/oi_simulator_gui.exe`。
 
 ## 技术栈
 
