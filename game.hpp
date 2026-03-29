@@ -151,6 +151,124 @@ inline double calculateErrorRate(const SubProblem& sp) {
     return std::max(0.0, std::min(0.8, baseProb));
 }
 
+inline std::string joinDisplayParts(const std::vector<std::string>& parts, const std::string& separator) {
+    std::string result;
+    for (size_t i = 0; i < parts.size(); ++i) {
+        if (i > 0) result += separator;
+        result += parts[i];
+    }
+    return result;
+}
+
+inline int getBaseBlurLevel(const Problem& problem, const SubProblem& sp) {
+    if (sp.blur <= 0) return 0;
+    if (problem.level <= 4) return 1;
+    if (problem.level <= 7) return 2;
+    return 3;
+}
+
+inline int getEffectiveBlurLevel(const Problem& problem, const SubProblem& sp) {
+    return std::max(0, getBaseBlurLevel(problem, sp) - playerStats.experience);
+}
+
+inline int getActiveBlurLevel(int problemIdx, int subProblemIdx) {
+    if (problemIdx < 0 || problemIdx >= static_cast<int>(problems.size())) return 0;
+    if (problemIdx >= static_cast<int>(subProblems.size())) return 0;
+    if (subProblemIdx < 0 || subProblemIdx >= static_cast<int>(subProblems[problemIdx].size())) return 0;
+
+    const auto& sp = subProblems[problemIdx][subProblemIdx];
+    const int thinkTime = calculateThinkTime(sp);
+    if (thinkProgress[problemIdx][subProblemIdx] >= thinkTime) return 0;
+    return getEffectiveBlurLevel(problems[problemIdx], sp);
+}
+
+inline std::string getThinkTimeDisplayTotal(int problemIdx, int subProblemIdx) {
+    if (problemIdx < 0 || problemIdx >= static_cast<int>(subProblems.size())) return "?";
+    if (subProblemIdx < 0 || subProblemIdx >= static_cast<int>(subProblems[problemIdx].size())) return "?";
+
+    const auto& sp = subProblems[problemIdx][subProblemIdx];
+    if (getActiveBlurLevel(problemIdx, subProblemIdx) > 0) return "?";
+    return std::to_string(calculateThinkTime(sp));
+}
+
+inline std::string buildSubProblemRequirementText(int problemIdx, int subProblemIdx) {
+    if (problemIdx < 0 || problemIdx >= static_cast<int>(subProblems.size())) return "无显式要求";
+    if (subProblemIdx < 0 || subProblemIdx >= static_cast<int>(subProblems[problemIdx].size())) return "无显式要求";
+
+    const auto& sp = subProblems[problemIdx][subProblemIdx];
+    const int activeBlur = getActiveBlurLevel(problemIdx, subProblemIdx);
+    std::vector<std::string> requirements;
+    std::vector<std::string> traits;
+
+    if (activeBlur >= 3) {
+        return "要求：模糊不清\n特性：模糊";
+    }
+
+    auto addRequirement = [&requirements](const std::string& label, int value, bool hidden) {
+        if (value > 0) requirements.push_back(label + ":" + (hidden ? "?" : std::to_string(value)));
+    };
+
+    addRequirement("动态规划", sp.dp, activeBlur >= 1);
+    addRequirement("数据结构", sp.ds, activeBlur >= 1);
+    addRequirement("字符串", sp.str, activeBlur >= 1);
+    addRequirement("图论", sp.graph, activeBlur >= 1);
+    addRequirement("组合计数", sp.comb, activeBlur >= 1);
+    addRequirement("思维", sp.thinking, activeBlur >= 2);
+    addRequirement("代码", sp.coding, activeBlur >= 2);
+
+    if (sp.adhoc > 0) traits.push_back("Adhoc:" + std::to_string(sp.adhoc));
+
+    if (activeBlur <= 1) {
+        if (sp.detail > 0) traits.push_back("细节:" + std::to_string(sp.detail));
+        if (sp.trap > 0) traits.push_back("陷阱:" + std::to_string(sp.trap));
+        if (sp.heat > 0) traits.push_back("红温:" + std::to_string(sp.heat));
+        if (sp.fallback > 0) traits.push_back("回退:" + std::to_string(sp.fallback + 1));
+        if (sp.inspire > 0) traits.push_back("激励:+" + std::to_string(sp.inspire));
+    }
+
+    if (activeBlur > 0 && sp.blur > 0) traits.push_back("模糊");
+    if (activeBlur <= 2 && sp.independent == 0) traits.push_back("非独立");
+
+    const std::string requirementText = requirements.empty() ? "无显式要求" : joinDisplayParts(requirements, "  ");
+    if (traits.empty()) return requirementText;
+    return requirementText + "\n特性：" + joinDisplayParts(traits, "  ");
+}
+
+inline void addExperience(int amount, const std::string& reason) {
+    if (amount <= 0) return;
+
+    const int before = playerStats.experience;
+    playerStats.experience = std::min(20, playerStats.experience + amount);
+    const int gained = playerStats.experience - before;
+    if (gained > 0) {
+        logEvent(reason + "，经验+" + std::to_string(gained) + "，当前经验：" + std::to_string(playerStats.experience), "event");
+    }
+}
+
+inline void settleTempExperience(const std::string& reason = "经验积累转化") {
+    while (playerStats.tempExperience >= 6 && playerStats.experience < 20) {
+        playerStats.tempExperience -= 6;
+        addExperience(1, reason);
+    }
+}
+
+inline void addTempExperience(int amount, const std::string& reason) {
+    if (amount <= 0) return;
+
+    playerStats.tempExperience += amount;
+    logEvent(reason + "，经验积累+" + std::to_string(amount) + "，当前经验积累：" + std::to_string(playerStats.tempExperience), "event");
+    settleTempExperience("经验积累达到 6 点");
+}
+
+inline bool isTopAwardForExperience(const std::string& contestType, const std::string& award) {
+    if ((contestType == "CSP-S" || contestType == "NOIP") && award == "一等奖") return true;
+    if ((contestType == "WC" || contestType == "APIO" || contestType == "NOI" || contestType == "IOI") && award == "金牌") return true;
+    if (contestType == "省选" && award == "省队A队") return true;
+    if (contestType == "CTT" && award == "入选候选队") return true;
+    if (contestType == "CTS" && award == "入选国家队") return true;
+    return false;
+}
+
 // ========== UI显示函数（使用\t对齐） ==========
 
 inline void displayPlayerStatus() {
@@ -173,6 +291,8 @@ inline void displayPlayerStatus() {
     if (playerStats.carefulness > 0) std::cout << "│\t  细心: " << std::setw(2) << playerStats.carefulness << "\t\t\t\t│\n";
     if (playerStats.quickness > 0) std::cout << "│\t  迅捷: " << std::setw(2) << playerStats.quickness << "\t\t\t\t│\n";
     if (playerStats.mental > 0) std::cout << "│\t  心理素质: " << std::setw(2) << playerStats.mental << "\t\t\t│\n";
+    std::cout << "│\t  经验: " << std::setw(2) << playerStats.experience << "\t\t\t\t│\n";
+    std::cout << "│\t  经验积累: " << std::setw(2) << playerStats.tempExperience << "/6\t\t\t│\n";
     if (playerStats.culture > 0) std::cout << "│\t  文化课: " << std::setw(2) << playerStats.culture << "\t\t\t│\n";
     std::cout << "└────────────────────────────────────────┘\n";
 }
@@ -344,22 +464,19 @@ inline void displaySubProblems() {
         
         if (isCodeComplete[idx][i]) { std::cout << "\t[✓已完成]\n"; continue; }
         
-        // 显示属性
-        std::cout << "\t";
-        if (sp.dp > 0) std::cout << "动态规划:" << (sp.blur && thinkProgress[idx][i] < thinkTime ? "?" : std::to_string(sp.dp)) << " ";
-        if (sp.ds > 0) std::cout << "数据结构:" << (sp.blur && thinkProgress[idx][i] < thinkTime ? "?" : std::to_string(sp.ds)) << " ";
-        if (sp.str > 0) std::cout << "字符串:" << (sp.blur && thinkProgress[idx][i] < thinkTime ? "?" : std::to_string(sp.str)) << " ";
-        if (sp.graph > 0) std::cout << "图论:" << (sp.blur && thinkProgress[idx][i] < thinkTime ? "?" : std::to_string(sp.graph)) << " ";
-        if (sp.comb > 0) std::cout << "组合计数:" << (sp.blur && thinkProgress[idx][i] < thinkTime ? "?" : std::to_string(sp.comb)) << " ";
-        if (sp.thinking > 0) std::cout << "思维:" << sp.thinking << " ";
-        if (sp.coding > 0) std::cout << "代码:" << sp.coding << " ";
-        std::cout << "\n";
+        std::string requirementText = buildSubProblemRequirementText(idx, static_cast<int>(i));
+        size_t newlinePos = 0;
+        while ((newlinePos = requirementText.find('\n', newlinePos)) != std::string::npos) {
+            requirementText.replace(newlinePos, 1, "\n\t");
+            newlinePos += 2;
+        }
+        std::cout << "\t" << requirementText << "\n";
         
         double thinkRate = calculateThinkSuccessRate(sp);
         double codeRate = calculateCodeSuccessRate(sp);
         
         if (thinkProgress[idx][i] < thinkTime)
-            std::cout << "\t[" << (i+1) << "a] 思考 (" << thinkProgress[idx][i] << "/" << (sp.blur && thinkProgress[idx][i] < thinkTime ? "?" : std::to_string(thinkTime)) << ", 成功率:" << (int)(thinkRate*100) << "%)\n";
+            std::cout << "\t[" << (i+1) << "a] 思考 (" << thinkProgress[idx][i] << "/" << getThinkTimeDisplayTotal(idx, static_cast<int>(i)) << ", 成功率:" << (int)(thinkRate*100) << "%)\n";
         if (thinkProgress[idx][i] >= thinkTime && codeProgress[idx][i] < codeTime)
             std::cout << "\t[" << (i+1) << "b] 写代码 (" << codeProgress[idx][i] << "/" << codeTime << ", 成功率:" << (int)(codeRate*100) << "%)\n";
         if (codeProgress[idx][i] >= codeTime)
@@ -492,14 +609,12 @@ inline std::string calculateAward(int score, const std::string& contestType) {
         else if (score >= 50 * mult) award = "三等奖";
         else award = "没有获奖";
         playerStats.achievements.push_back(contestType + "：" + std::to_string(score) + "分，" + award);
-        return award;
     } else if (contestType == "WC" || contestType == "APIO") {
         if (score >= 220 * mult) award = "金牌";
         else if (score >= 160 * mult) award = "银牌";
         else if (score >= 100 * mult) award = "铜牌";
         else award = "铁牌";
         playerStats.achievements.push_back(contestType + "：" + std::to_string(score) + "分，" + award);
-        return award;
     } else if (contestType == "省选") {
         int totalScore = playerStats.tempScore;
         playerStats.isProvincialTeamA = false;
@@ -513,7 +628,6 @@ inline std::string calculateAward(int score, const std::string& contestType) {
         }
         playerStats.isProvincialTeam = award.find("省队") != std::string::npos;
         playerStats.achievements.push_back("省选：" + std::to_string(totalScore) + "分，" + award);
-        return award;
     } else if (contestType == "NOI") {
         int totalScore = playerStats.tempScore;
         if (totalScore >= 400 * mult) { award = "金牌"; playerStats.isTrainingTeam = true; }
@@ -521,19 +635,16 @@ inline std::string calculateAward(int score, const std::string& contestType) {
         else if (totalScore >= 200 * mult) award = "铜牌";
         else award = "铁牌";
         playerStats.achievements.push_back("NOI：" + std::to_string(totalScore) + "分，" + award);
-        return award;
     } else if (contestType == "CTT") {
         int totalScore = playerStats.tempScore;
         award = totalScore >= 600 * mult ? "入选候选队" : "没有入选候选队";
         if (totalScore >= 600 * mult) playerStats.isCandidateTeam = true;
         playerStats.achievements.push_back("CTT：" + std::to_string(totalScore) + "分，" + award);
-        return award;
     } else if (contestType == "CTS") {
         int totalScore = playerStats.tempScore;
         award = totalScore >= 900 * mult ? "入选国家队" : "没有入选国家队";
         if (totalScore >= 900 * mult) playerStats.isNationalTeam = true;
         playerStats.achievements.push_back("CTS：" + std::to_string(totalScore) + "分，" + award);
-        return award;
     } else if (contestType == "IOI") {
         int totalScore = playerStats.tempScore;
         if (totalScore >= 400 * mult) { award = "金牌"; playerStats.isIOIgold = true; }
@@ -541,9 +652,13 @@ inline std::string calculateAward(int score, const std::string& contestType) {
         else if (totalScore >= 200 * mult) award = "铜牌";
         else award = "铁牌";
         playerStats.achievements.push_back("IOI：" + std::to_string(totalScore) + "分，" + award);
-        return award;
     }
-    return "";
+    
+    if (isTopAwardForExperience(contestType, award)) {
+        addTempExperience(1, contestType + "最高奖项奖励");
+    }
+
+    return award;
 }
 
 // 显示比赛结果
@@ -931,6 +1046,7 @@ inline void runGame() {
         logEvent("由于未进入省队，第一年的NOI阶段跳过", "event");
     }
 
+    addExperience(1, "升入高二");
     currentPhase = 17;
     logEvent("第九次训练开始...", "event");
     runTrainingPhase(8);

@@ -134,51 +134,8 @@ namespace
 
     std::string BuildRequirementText(const SubProblem &sp, int problemIdx, int subProblemIdx)
     {
-        std::vector<std::string> requirements;
-        std::vector<std::string> traits;
-        const int thinkTime = calculateThinkTime(sp);
-        const bool hidden = sp.blur && thinkProgress[problemIdx][subProblemIdx] < thinkTime;
-        auto visibleValue = [hidden](int value)
-        {
-            return hidden ? "?" : std::to_string(value);
-        };
-
-        if (sp.dp > 0)
-            requirements.push_back("动态规划:" + visibleValue(sp.dp));
-        if (sp.ds > 0)
-            requirements.push_back("数据结构:" + visibleValue(sp.ds));
-        if (sp.str > 0)
-            requirements.push_back("字符串:" + visibleValue(sp.str));
-        if (sp.graph > 0)
-            requirements.push_back("图论:" + visibleValue(sp.graph));
-        if (sp.comb > 0)
-            requirements.push_back("组合计数:" + visibleValue(sp.comb));
-        if (sp.thinking > 0)
-            requirements.push_back("思维:" + std::to_string(sp.thinking));
-        if (sp.coding > 0)
-            requirements.push_back("代码:" + std::to_string(sp.coding));
-
-        if (sp.adhoc > 0)
-            traits.push_back("Adhoc:" + std::to_string(sp.adhoc));
-        if (sp.detail > 0)
-            traits.push_back("细节:" + std::to_string(sp.detail));
-        if (sp.trap > 0)
-            traits.push_back("陷阱:" + std::to_string(sp.trap));
-        if (sp.heat > 0)
-            traits.push_back("红温:" + std::to_string(sp.heat));
-        if (sp.fallback > 0)
-            traits.push_back("回退:" + std::to_string(sp.fallback + 1));
-        if (sp.inspire > 0)
-            traits.push_back("激励:+" + std::to_string(sp.inspire));
-        if (sp.blur > 0)
-            traits.push_back("模糊");
-        if (sp.independent == 0)
-            traits.push_back("非独立");
-
-        const std::string requirementText = requirements.empty() ? "无显式要求" : JoinStrings(requirements, "  ");
-        if (traits.empty())
-            return requirementText;
-        return requirementText + "\n特性：" + JoinStrings(traits, "  ");
+        (void)sp;
+        return buildSubProblemRequirementText(problemIdx, subProblemIdx);
     }
 
     std::string FormatEffectValue(const EventOption &option, const std::string &key, int value)
@@ -806,6 +763,7 @@ namespace
                 BeginContestStep(8);
                 return;
             case 16:
+                addExperience(1, "升入高二");
                 storyCursor_ = 17;
                 BeginTrainingPhase(17, 8, "第九次训练开始...");
                 return;
@@ -1332,8 +1290,8 @@ namespace
             ImGui::Separator();
             ImGui::TextWrapped("%s", BuildRequirementText(sp, problemIdx, static_cast<int>(i)).c_str());
             ImGui::Spacing();
-            ImGui::Text("思考进度：%d / %s", thinkProgress[problemIdx][i],
-                        (sp.blur && thinkProgress[problemIdx][i] < thinkTime) ? "?" : std::to_string(thinkTime).c_str());
+            const std::string thinkTotalText = getThinkTimeDisplayTotal(problemIdx, static_cast<int>(i));
+            ImGui::Text("思考进度：%d / %s", thinkProgress[problemIdx][i], thinkTotalText.c_str());
             ImGui::Text("代码进度：%d / %d", codeProgress[problemIdx][i], codeTime);
             ImGui::Text("思考成功率：%d%%", static_cast<int>(thinkRate * 100));
             ImGui::Text("写代码成功率：%d%%", static_cast<int>(codeRate * 100));
@@ -1475,6 +1433,8 @@ namespace
         ImGui::Text("细心：%d", playerStats.carefulness);
         ImGui::Text("迅捷：%d", playerStats.quickness);
         ImGui::Text("心理素质：%d", playerStats.mental);
+        ImGui::Text("经验：%d", playerStats.experience);
+        ImGui::Text("经验积累：%d / 6", playerStats.tempExperience);
         ImGui::Spacing();
         ImGui::TextUnformatted("知识点");
         ImGui::Text("动态规划：%d", playerStats.dp);
