@@ -134,7 +134,8 @@ namespace
 
     std::string BuildRequirementText(const SubProblem &sp, int problemIdx, int subProblemIdx)
     {
-        std::vector<std::string> parts;
+        std::vector<std::string> requirements;
+        std::vector<std::string> traits;
         const int thinkTime = calculateThinkTime(sp);
         const bool hidden = sp.blur && thinkProgress[problemIdx][subProblemIdx] < thinkTime;
         auto visibleValue = [hidden](int value)
@@ -143,21 +144,82 @@ namespace
         };
 
         if (sp.dp > 0)
-            parts.push_back("动态规划:" + visibleValue(sp.dp));
+            requirements.push_back("动态规划:" + visibleValue(sp.dp));
         if (sp.ds > 0)
-            parts.push_back("数据结构:" + visibleValue(sp.ds));
+            requirements.push_back("数据结构:" + visibleValue(sp.ds));
         if (sp.str > 0)
-            parts.push_back("字符串:" + visibleValue(sp.str));
+            requirements.push_back("字符串:" + visibleValue(sp.str));
         if (sp.graph > 0)
-            parts.push_back("图论:" + visibleValue(sp.graph));
+            requirements.push_back("图论:" + visibleValue(sp.graph));
         if (sp.comb > 0)
-            parts.push_back("组合计数:" + visibleValue(sp.comb));
+            requirements.push_back("组合计数:" + visibleValue(sp.comb));
         if (sp.thinking > 0)
-            parts.push_back("思维:" + std::to_string(sp.thinking));
+            requirements.push_back("思维:" + std::to_string(sp.thinking));
         if (sp.coding > 0)
-            parts.push_back("代码:" + std::to_string(sp.coding));
+            requirements.push_back("代码:" + std::to_string(sp.coding));
 
-        return parts.empty() ? "无显式要求" : JoinStrings(parts, "  ");
+        if (sp.adhoc > 0)
+            traits.push_back("Adhoc:" + std::to_string(sp.adhoc));
+        if (sp.detail > 0)
+            traits.push_back("细节:" + std::to_string(sp.detail));
+        if (sp.trap > 0)
+            traits.push_back("陷阱:" + std::to_string(sp.trap));
+        if (sp.heat > 0)
+            traits.push_back("红温:" + std::to_string(sp.heat));
+        if (sp.fallback > 0)
+            traits.push_back("回退:" + std::to_string(sp.fallback + 1));
+        if (sp.inspire > 0)
+            traits.push_back("激励:+" + std::to_string(sp.inspire));
+        if (sp.blur > 0)
+            traits.push_back("模糊");
+        if (sp.independent == 0)
+            traits.push_back("非独立");
+
+        const std::string requirementText = requirements.empty() ? "无显式要求" : JoinStrings(requirements, "  ");
+        if (traits.empty())
+            return requirementText;
+        return requirementText + "\n特性：" + JoinStrings(traits, "  ");
+    }
+
+    std::string FormatEffectValue(const EventOption &option, const std::string &key, int value)
+    {
+        if (key == "mood" && option.text == "缓和心态")
+        {
+            return "心态设为" + std::to_string(value);
+        }
+
+        const std::string statName = Utils::getStatName(key);
+        if (value > 0)
+        {
+            return statName + "+" + std::to_string(value);
+        }
+        if (value < 0)
+        {
+            return statName + std::to_string(value);
+        }
+        return statName + "+0";
+    }
+
+    std::string BuildOptionEffectText(const EventOption &option)
+    {
+        std::vector<std::string> effects;
+        for (const auto &[key, value] : option.effects)
+        {
+            effects.push_back(FormatEffectValue(option, key, value));
+        }
+
+        if (!option.nextEvent.empty() || !option.randomChoices.empty() ||
+            !option.probabilityEffects.empty() || !option.nextEventProbability.empty())
+        {
+            effects.push_back("?");
+        }
+
+        if (effects.empty())
+        {
+            return "效果：无";
+        }
+
+        return "效果：" + JoinStrings(effects, "，");
     }
 
     class GuiApp
@@ -1179,9 +1241,10 @@ namespace
         for (size_t i = 0; i < training_.options.size(); ++i)
         {
             const auto &option = training_.options[i];
+            const std::string effectText = BuildOptionEffectText(option);
             ImGui::PushID(static_cast<int>(i));
-            ImGui::BeginChild("option_card", ImVec2(0.0f, 86.0f), true);
-            ImGui::Text("%zu. %s", i + 1, option.text.c_str());
+            ImGui::BeginChild("option_card", ImVec2(0.0f, 135.0f), true);
+            ImGui::TextWrapped("%zu. %s\n%s", i + 1, option.text.c_str(), effectText.c_str());
             if (!option.description.empty())
             {
                 ImGui::TextWrapped("%s", option.description.c_str());
@@ -1258,7 +1321,7 @@ namespace
                                   (isCurrentContestIOI() || timePoints > 0);
 
             ImGui::PushID(static_cast<int>(i));
-            ImGui::BeginChild("subproblem_card", ImVec2(0.0f, 180.0f), true);
+            ImGui::BeginChild("subproblem_card", ImVec2(0.0f, 267.0f), true);
             ImGui::Text("部分分 %zu  |  %d 分", i + 1, sp.score);
             if (completed)
             {
