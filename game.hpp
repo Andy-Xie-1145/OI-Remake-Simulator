@@ -181,8 +181,13 @@ inline void triggerRandomEvent(int problemIdx, int subProblemIdx) {
     if (timePoints <= 0) return;
 
     const auto& currentSubProblem = subProblems[problemIdx][subProblemIdx];
-    std::vector<int> eventOrder = {0, 1, 2, 3, 4};
-    std::shuffle(eventOrder.begin(), eventOrder.end(), gen);
+    struct PendingEvent {
+        int idx = -1;
+        double probability = 0.0;
+        std::string name;
+        std::string description;
+        std::string effectText;
+    };
 
     auto lastNAre = [](const std::vector<std::string>& actions, int n, const std::string& value) {
         if (static_cast<int>(actions.size()) < n) return false;
@@ -192,7 +197,9 @@ inline void triggerRandomEvent(int problemIdx, int subProblemIdx) {
         return true;
     };
 
-    for (int idx : eventOrder) {
+    std::vector<PendingEvent> pendingEvents;
+
+    for (int idx = 0; idx < 5; ++idx) {
         bool condition = false;
         double probability = 0.0;
         std::string name;
@@ -241,15 +248,25 @@ inline void triggerRandomEvent(int problemIdx, int subProblemIdx) {
             break;
         }
 
-        if (!condition || !Utils::randomBool(probability)) continue;
+        if (!condition) continue;
+        pendingEvents.push_back({idx, probability, name, description, effectText});
+    }
 
-        if (idx == 0 || idx == 3 || idx == 4) mood = std::max(0, mood - 1);
-        else if (idx == 1) mood = std::min(MOOD_LIMIT, mood + 1);
-        else if (idx == 2) codeProgress[problemIdx][subProblemIdx] = std::max(0, codeProgress[problemIdx][subProblemIdx] - 1);
+    if (pendingEvents.empty()) return;
 
-        logEvent("触发突发事件：" + name, "event");
-        logEvent(description, "event");
-        logEvent(effectText, "event");
+    const double roll = Utils::randomDouble(0.0, 1.0);
+    double accumulated = 0.0;
+    for (const auto& event : pendingEvents) {
+        accumulated += event.probability;
+        if (roll >= accumulated) continue;
+
+        if (event.idx == 0 || event.idx == 3 || event.idx == 4) mood = std::max(0, mood - 1);
+        else if (event.idx == 1) mood = std::min(MOOD_LIMIT, mood + 1);
+        else if (event.idx == 2) codeProgress[problemIdx][subProblemIdx] = std::max(0, codeProgress[problemIdx][subProblemIdx] - 1);
+
+        logEvent("触发突发事件：" + event.name, "event");
+        logEvent(event.description, "event");
+        logEvent(event.effectText, "event");
         logEvent("当前心态值：" + std::to_string(mood), "event");
         return;
     }
