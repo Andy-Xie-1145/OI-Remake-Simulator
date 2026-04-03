@@ -239,6 +239,7 @@ namespace
         void BeginContestStep(int contestId);
         void FinalizeContest();
         void HandleContestAction(int subProblemIdx, char action);
+        void ModifyCodeProblem(int problemIdx, int subProblemIdx);
         void SetGameOver(std::string reason);
         void AdvanceStory();
         void ShowNotice(NoticeView notice);
@@ -736,6 +737,27 @@ namespace
         if (isFullScore())
         {
             FinalizeContest();
+        }
+    }
+
+    void GuiApp::ModifyCodeProblem(int problemIdx, int subProblemIdx)
+    {
+        if (problemIdx < 0 || problemIdx >= static_cast<int>(subProblems.size()))
+            return;
+        if (subProblemIdx < 0 || subProblemIdx >= static_cast<int>(subProblems[problemIdx].size()))
+            return;
+
+        modifyCodeSubProblem(problemIdx, subProblemIdx);
+
+        if (hasPendingContestNotice())
+        {
+            const PendingContestNotice eventNotice = consumePendingContestNotice();
+            NoticeView notice;
+            notice.title = eventNotice.title;
+            notice.body = eventNotice.description;
+            notice.detail = eventNotice.effectText;
+            notice.action = NoticeView::Action::ReturnContest;
+            ShowNotice(std::move(notice));
         }
     }
 
@@ -1420,6 +1442,11 @@ namespace
             const std::string thinkTotalText = getThinkTimeDisplayTotal(problemIdx, static_cast<int>(i));
             ImGui::Text("思考进度：%d / %s", thinkProgress[problemIdx][i], thinkTotalText.c_str());
             ImGui::Text("代码进度：%d / %d", codeProgress[problemIdx][i], codeTime);
+            // 显示修改代码进度（如果已修改过）
+            if (modificationCount[problemIdx][i] > 0)
+            {
+                ImGui::Text("修改代码：%d次", modificationCount[problemIdx][i]);
+            }
             ImGui::Text("思考成功率：%d%%", static_cast<int>(thinkRate * 100));
             ImGui::Text("写代码成功率：%d%%", static_cast<int>(codeRate * 100));
             if (errorRates[problemIdx][i] >= 0.0)
@@ -1455,6 +1482,31 @@ namespace
                 HandleContestAction(static_cast<int>(i), 'c');
             }
             ImGui::EndDisabled();
+
+            // 修改代码按钮（仅非IOI比赛，对拍失败后）
+            const bool canModify = !completed &&
+                                   codeProgress[problemIdx][i] >= codeTime &&
+                                   hasAttemptedCheck[problemIdx][i] &&  // 已尝试对拍
+                                   !isCodeComplete[problemIdx][i] &&    // 对拍未成功
+                                   !isCurrentContestIOI();              // 非IOI比赛
+            if (canModify)
+            {
+                ImGui::SameLine();
+                const int timeCost = 1 + sp.branch;
+                ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.1f, 0.6f, 0.6f));
+                if (ImGui::Button(("修改代码 (" + std::to_string(timeCost) + "时间)").c_str(), ImVec2(130.0f, 30.0f)))
+                {
+                    ModifyCodeProblem(problemIdx, static_cast<int>(i));
+                }
+                ImGui::PopStyleColor();
+
+                // 显示分支值（题目固定属性）
+                if (sp.branch > 0)
+                {
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("(分支:%d)", sp.branch);
+                }
+            }
 
             ImGui::EndChild();
             ImGui::PopID();
@@ -1560,6 +1612,7 @@ namespace
         ImGui::Text("细心：%d", playerStats.carefulness);
         ImGui::Text("迅捷：%d", playerStats.quickness);
         ImGui::Text("心理素质：%d", playerStats.mental);
+        ImGui::Text("运气：%d", playerStats.luck);
         ImGui::Text("经验：%d", playerStats.experience);
         ImGui::Text("经验积累：%d / 6", playerStats.tempExperience);
         ImGui::Spacing();

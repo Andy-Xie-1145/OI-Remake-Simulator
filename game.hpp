@@ -30,6 +30,8 @@ inline std::vector<std::vector<int>> thinkProgress;
 inline std::vector<std::vector<int>> codeProgress;
 inline std::vector<std::vector<bool>> isCodeComplete;
 inline std::vector<std::vector<double>> errorRates;
+inline std::vector<std::vector<int>> modificationCount;  // 修改代码次数跟踪
+inline std::vector<std::vector<bool>> hasAttemptedCheck;  // 是否已尝试对拍
 
 // 操作记录
 inline std::vector<std::string> lastActions;
@@ -165,11 +167,17 @@ inline double calculateCodeSuccessRate(const SubProblem& sp) {
     return std::max(0.4, std::min(0.95, baseProb));
 }
 
+inline double calculateLuckReduction() {
+    if (playerStats.luck <= 0) return 0.0;
+    return std::log2(playerStats.luck + 1.0) * 0.006;  // Max 25% at luck=20
+}
+
 inline double calculateErrorRate(const SubProblem& sp) {
     if (debugmode) return 0.0;
     double baseProb = 0.1;
     baseProb += sp.trap * 0.05;
     baseProb -= playerStats.carefulness * 0.03;
+    baseProb -= playerStats.luck * 0.02;  // Luck reduces error rate
     baseProb += std::pow(std::max(10 - mood, 0), 2) * 0.01;
     return std::max(0.0, std::min(0.8, baseProb));
 }
@@ -252,7 +260,7 @@ inline std::string buildSubProblemRequirementText(int problemIdx, int subProblem
         if (sp.detail > 0) traits.push_back("细节:" + std::to_string(sp.detail));
         if (sp.trap > 0) traits.push_back("陷阱:" + std::to_string(sp.trap));
         if (sp.heat > 0) traits.push_back("红温:" + std::to_string(sp.heat));
-        if (sp.fallback > 0) traits.push_back("回退:" + std::to_string(sp.fallback + 1));
+        if (sp.branch > 0) traits.push_back("分支:" + std::to_string(sp.branch));
         if (sp.inspire > 0) traits.push_back("激励:+" + std::to_string(sp.inspire));
     }
 
@@ -331,6 +339,8 @@ inline void triggerRandomEvent(int problemIdx, int subProblemIdx) {
     if (timePoints <= 0) return;
 
     const auto& currentSubProblem = subProblems[problemIdx][subProblemIdx];
+    double luckReduction = calculateLuckReduction();  // Luck reduces negative events
+
     struct PendingEvent {
         int idx = -1;
         double probability = 0.0;
@@ -361,7 +371,7 @@ inline void triggerRandomEvent(int problemIdx, int subProblemIdx) {
             condition = lastActions.size() >= 3 &&
                 lastActions[lastActions.size() - 1] == lastActions[lastActions.size() - 2] &&
                 lastActions[lastActions.size() - 2] == lastActions[lastActions.size() - 3];
-            probability = 0.04;
+            probability = 0.04 * (1.0 - luckReduction);  // Luck reduces negative events
             name = "心态爆炸";
             description = "连续失败让你感到沮丧...";
             effectText = "心态值-1";
@@ -369,7 +379,7 @@ inline void triggerRandomEvent(int problemIdx, int subProblemIdx) {
         case 1:
             condition = !lastActions.empty() && lastActions.back() == "think" &&
                 thinkProgress[problemIdx][subProblemIdx] > calculateThinkTime(currentSubProblem) / 2;
-            probability = 0.03;
+            probability = 0.03;  // Positive event, not affected by luck
             name = "灵光一闪";
             description = "突然想到了一个好方法！";
             effectText = "心态值+1";
@@ -377,21 +387,21 @@ inline void triggerRandomEvent(int problemIdx, int subProblemIdx) {
         case 2:
             condition = lastNAre(lastActions, 2, "code") &&
                 codeProgress[problemIdx][subProblemIdx] > calculateCodeTime(currentSubProblem) / 2;
-            probability = 0.03;
+            probability = 0.03 * (1.0 - luckReduction);  // Luck reduces negative events
             name = "代码bug";
             description = "写着写着发现之前的代码有问题...";
             effectText = "代码进度-1";
             break;
         case 3:
             condition = lastNAre(lastActions, 2, "code");
-            probability = 0.02;
+            probability = 0.02 * (1.0 - luckReduction);  // Luck reduces negative events
             name = "键盘故障";
             description = "键盘突然有点不太灵了...";
             effectText = "心态值-1";
             break;
         case 4:
             condition = true;
-            probability = 0.01;
+            probability = 0.01 * (1.0 - luckReduction);  // Luck reduces negative events
             name = "监考老师巡视";
             description = "监考老师正在经过你的座位...";
             effectText = "心态值-1";
@@ -439,6 +449,8 @@ inline void startContest(int contestId) {
     codeProgress.clear();
     isCodeComplete.clear();
     errorRates.clear();
+    modificationCount.clear();
+    hasAttemptedCheck.clear();  // 清除对拍标志
     clearPendingContestNotice();
     
     totalProblems = (int)config.problemRanges.size();
@@ -465,6 +477,8 @@ inline void startContest(int contestId) {
         codeProgress.push_back(std::vector<int>(prob.parts.size(), 0));
         isCodeComplete.push_back(std::vector<bool>(prob.parts.size(), false));
         errorRates.push_back(std::vector<double>(prob.parts.size(), -1.0));
+        modificationCount.push_back(std::vector<int>(prob.parts.size(), 0));  // 初始化修改计数
+        hasAttemptedCheck.push_back(std::vector<bool>(prob.parts.size(), false));  // 初始化对拍标志
     }
     
     // 心态下降
@@ -590,19 +604,19 @@ inline void checkCodeSubProblem(int problemIdx, int subProblemIdx) {
     if (!isIOIContest) timePoints--;
     
     pushLastAction("check");
-    
+
+    hasAttemptedCheck[problemIdx][subProblemIdx] = true;  // 标记已尝试对拍
+
     logEvent((isIOIContest ? "提交" : "对拍") + std::string(" T") + std::to_string(problemIdx+1) + " 部分分" + std::to_string(subProblemIdx+1), "check");
     
     double errorRate = errorRates[problemIdx][subProblemIdx];
     if (Utils::randomBool(errorRate)) {
-        if (isIOIContest && Utils::randomBool(0.08)) {
+        if (isIOIContest && Utils::randomBool(0.08 * (1.0 - calculateLuckReduction()))) {
             mood = std::max(0, mood - 1);
             logEvent("服务器爆炸，心态-1", "check");
         } else {
-            const auto& sp = subProblems[problemIdx][subProblemIdx];
-            int fallback = sp.fallback + 1;
-            codeProgress[problemIdx][subProblemIdx] = std::max(0, codeProgress[problemIdx][subProblemIdx] - fallback);
-            logEvent((isIOIContest ? "提交" : "对拍") + std::string("失败！代码-") + std::to_string(fallback), "check");
+            // 对拍/提交失败，但不减少代码进度（移除fallback惩罚）
+            logEvent((isIOIContest ? "提交" : "对拍") + std::string("失败！可以尝试修改代码"), "check");
         }
     } else {
         const auto& sp = subProblems[problemIdx][subProblemIdx];
@@ -611,6 +625,39 @@ inline void checkCodeSubProblem(int problemIdx, int subProblemIdx) {
         if (sp.inspire > 0) mood = std::min(MOOD_LIMIT, mood + sp.inspire);
     }
     triggerRandomEvent(problemIdx, subProblemIdx);
+}
+
+// 修改代码
+inline void modifyCodeSubProblem(int problemIdx, int subProblemIdx) {
+    const SubProblem& sp = subProblems[problemIdx][subProblemIdx];
+
+    // 时间成本：1 + 分支值（简单直接，不受迅捷影响）
+    int timeCost = 1 + sp.branch;
+
+    if (timePoints < timeCost) {
+        logEvent("时间点不足，无法修改代码！", "code");
+        return;
+    }
+
+    timePoints -= timeCost;
+
+    // 保存原始错误率
+    double originalErrorRate = errorRates[problemIdx][subProblemIdx];
+
+    // 计算改善：最多减少原错误率的50%，有递减效应
+    double diminishingReturns = std::pow(0.7, modificationCount[problemIdx][subProblemIdx]);
+    double improvement = originalErrorRate * 0.5 * diminishingReturns;  // 最多50%
+
+    errorRates[problemIdx][subProblemIdx] = std::max(0.0,
+        errorRates[problemIdx][subProblemIdx] - improvement);
+
+    modificationCount[problemIdx][subProblemIdx]++;
+
+    logEvent("修改代码成功！出错概率从 " +
+             std::to_string(static_cast<int>(originalErrorRate * 100)) +
+             "% 降低到 " +
+             std::to_string(static_cast<int>(errorRates[problemIdx][subProblemIdx] * 100)) +
+             "%", "code");
 }
 
 inline bool isFullScore() {
@@ -811,11 +858,11 @@ inline void runContestLoop(int contestId) {
         
         displaySubProblems();
         
-        std::cout << "\n操作: [数字][a/b/c] 或 [p]上一题 [n]下一题 [0]离场\n";
+        std::cout << "\n操作: [数字][a/b/c/d] 或 [p]上一题 [n]下一题 [0]离场\n";
         std::cout << "请选择: ";
-        
+
         std::string input = Utils::readToken();
-        
+
         if (input == "p") currentProblem = currentProblem > 1 ? currentProblem - 1 : totalProblems;
         else if (input == "n") currentProblem = currentProblem < totalProblems ? currentProblem + 1 : 1;
         else if (input == "0" && isFullScore()) break;
@@ -826,6 +873,24 @@ inline void runContestLoop(int contestId) {
                 if (action == 'a') thinkSubProblem(currentProblem - 1, subIdx);
                 else if (action == 'b') writeCodeSubProblem(currentProblem - 1, subIdx);
                 else if (action == 'c') checkCodeSubProblem(currentProblem - 1, subIdx);
+                else if (action == 'd' || action == 'D') {
+                    // 修改代码（仅非IOI比赛）
+                    bool isIOIContest = false;
+                    for (const auto& cfg : CONTEST_CONFIGS) {
+                        if (cfg.second.name == currentContestName && cfg.second.isIOI) {
+                            isIOIContest = true;
+                            break;
+                        }
+                    }
+                    if (!isIOIContest &&
+                        codeProgress[currentProblem - 1][subIdx] >= calculateCodeTime(subProblems[currentProblem - 1][subIdx]) &&
+                        hasAttemptedCheck[currentProblem - 1][subIdx] &&  // 必须已尝试对拍
+                        !isCodeComplete[currentProblem - 1][subIdx]) {
+                        modifyCodeSubProblem(currentProblem - 1, subIdx);
+                    } else {
+                        std::cout << "无法修改代码！\n";
+                    }
+                }
             }
         }
     }

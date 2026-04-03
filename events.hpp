@@ -88,6 +88,7 @@ inline void applyStatDelta(const std::string& key, int value, const std::string&
     else if (key == "mental") applyBounded(playerStats.mental);
     else if (key == "experience") applyBounded(playerStats.experience);
     else if (key == "culture") applyBounded(playerStats.culture);
+    else if (key == "luck") applyBounded(playerStats.luck);
 }
 
 inline void applySelectedOptionEffects(const EventOption& option) {
@@ -113,6 +114,7 @@ inline std::vector<EventOption> buildShopOptions() {
         {"速度提升", {{"quickness", 1}}, {}, "", {}, {}, "花费" + std::to_string(currentShopPrices["速度提升"]) + "点决心提升1点迅捷", currentShopPrices["速度提升"]},
         {"心理素质提升", {{"mental", 1}}, {}, "", {}, {}, "花费" + std::to_string(currentShopPrices["心理素质提升"]) + "点决心提升1点心理素质", currentShopPrices["心理素质提升"]},
         {"经验提升", {{"experience", 1}}, {}, "", {}, {}, "花费" + std::to_string(currentShopPrices["经验提升"]) + "点决心提升1点经验", currentShopPrices["经验提升"]},
+        {"运气提升", {{"luck", 2}}, {}, "", {}, {}, "花费" + std::to_string(currentShopPrices["运气提升"]) + "点决心提升2点运气，减少负面事件", currentShopPrices["运气提升"]},
         {"放弃购买", {}, {}, "", {}, {}, "离开商店", 0}
     };
 }
