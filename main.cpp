@@ -33,6 +33,7 @@ namespace
         Home,
         Talent,
         Training,
+        Notice,
         Contest,
         ContestResult,
         GameOver
@@ -75,6 +76,27 @@ namespace
         std::string reason;
     };
 
+    struct NoticeView
+    {
+        enum class Action
+        {
+            None,
+            BeginTrainingPhase,
+            ReturnContest,
+            FinalizeContest
+        };
+
+        bool active = false;
+        std::string title;
+        std::string body;
+        std::string detail;
+        std::string buttonLabel = "继续";
+        Action action = Action::None;
+        int phase = 0;
+        int numEvents = 0;
+        std::string startLog;
+    };
+
     void ResetSharedState()
     {
         playerStats = PlayerStats();
@@ -96,6 +118,7 @@ namespace
         totalTrainingEvents = 5;
         currentShopPrices.clear();
         gameLog.clear();
+        clearPendingContestNotice();
         clearShopState();
     }
 
@@ -194,6 +217,7 @@ namespace
         std::array<int, 5> talents_{};
         int storyCursor_ = 0;
         TrainingView training_;
+        NoticeView notice_;
         ContestResultView contestResult_;
         GameOverView gameOver_;
         bool gameInitialized_ = false;
@@ -217,11 +241,14 @@ namespace
         void HandleContestAction(int subProblemIdx, char action);
         void SetGameOver(std::string reason);
         void AdvanceStory();
+        void ShowNotice(NoticeView notice);
+        void DismissNotice();
 
         void RenderTopBar();
         void RenderHome();
         void RenderTalent();
         void RenderTraining();
+        void RenderNotice();
         void RenderContest();
         void RenderContestResult();
         void RenderGameOver();
@@ -276,6 +303,7 @@ namespace
         talents_.fill(0);
         storyCursor_ = 0;
         training_ = TrainingView();
+        notice_ = NoticeView();
         contestResult_ = ContestResultView();
         gameOver_ = GameOverView();
         gameInitialized_ = false;
@@ -289,6 +317,7 @@ namespace
         talents_.fill(0);
         storyCursor_ = 0;
         training_ = TrainingView();
+        notice_ = NoticeView();
         contestResult_ = ContestResultView();
         gameOver_ = GameOverView();
         gameInitialized_ = true;
@@ -642,6 +671,39 @@ namespace
         screen_ = GuiScreen::ContestResult;
     }
 
+    void GuiApp::ShowNotice(NoticeView notice)
+    {
+        notice_ = std::move(notice);
+        notice_.active = true;
+        screen_ = GuiScreen::Notice;
+    }
+
+    void GuiApp::DismissNotice()
+    {
+        const NoticeView::Action action = notice_.action;
+        const int phase = notice_.phase;
+        const int numEvents = notice_.numEvents;
+        const std::string startLog = notice_.startLog;
+        notice_ = NoticeView();
+
+        switch (action)
+        {
+        case NoticeView::Action::BeginTrainingPhase:
+            BeginTrainingPhase(phase, numEvents, startLog);
+            break;
+        case NoticeView::Action::ReturnContest:
+            screen_ = GuiScreen::Contest;
+            break;
+        case NoticeView::Action::FinalizeContest:
+            FinalizeContest();
+            break;
+        case NoticeView::Action::None:
+        default:
+            screen_ = GuiScreen::Training;
+            break;
+        }
+    }
+
     void GuiApp::HandleContestAction(int subProblemIdx, char action)
     {
         const int problemIdx = currentProblem - 1;
@@ -659,7 +721,19 @@ namespace
         else
             return;
 
-        if (timePoints <= 0 || isFullScore())
+        if (hasPendingContestNotice())
+        {
+            const PendingContestNotice eventNotice = consumePendingContestNotice();
+            NoticeView notice;
+            notice.title = eventNotice.title;
+            notice.body = eventNotice.description;
+            notice.detail = eventNotice.effectText;
+            notice.action = isFullScore() ? NoticeView::Action::FinalizeContest : NoticeView::Action::ReturnContest;
+            ShowNotice(std::move(notice));
+            return;
+        }
+
+        if (isFullScore())
         {
             FinalizeContest();
         }
@@ -765,7 +839,17 @@ namespace
             case 16:
                 addExperience(1, "升入高二");
                 storyCursor_ = 17;
-                BeginTrainingPhase(17, 8, "第九次训练开始...");
+                {
+                    NoticeView notice;
+                    notice.title = "升入高二";
+                    notice.body = "经过 1 年的学习与比赛历练，你对 OI 的理解更深了一层。";
+                    notice.detail = "经验+1";
+                    notice.action = NoticeView::Action::BeginTrainingPhase;
+                    notice.phase = 17;
+                    notice.numEvents = 8;
+                    notice.startLog = "第九次训练开始...";
+                    ShowNotice(std::move(notice));
+                }
                 return;
             case 17:
                 storyCursor_ = 18;
@@ -1022,6 +1106,9 @@ namespace
         case GuiScreen::Training:
             RenderTraining();
             break;
+        case GuiScreen::Notice:
+            RenderNotice();
+            break;
         case GuiScreen::Contest:
             RenderContest();
             break;
@@ -1220,6 +1307,36 @@ namespace
             ImGui::Spacing();
         }
     }
+
+    void GuiApp::RenderNotice()
+    {
+        if (!notice_.active)
+        {
+            screen_ = GuiScreen::Training;
+            return;
+        }
+
+        ImGui::TextUnformatted(notice_.title.c_str());
+        ImGui::Separator();
+
+        if (!notice_.body.empty())
+        {
+            ImGui::TextWrapped("%s", notice_.body.c_str());
+            ImGui::Spacing();
+        }
+
+        if (!notice_.detail.empty())
+        {
+            ImGui::TextColored(ImVec4(0.28f, 0.62f, 0.34f, 1.0f), "%s", notice_.detail.c_str());
+            ImGui::Spacing();
+        }
+
+        if (ImGui::Button(notice_.buttonLabel.c_str(), ImVec2(140.0f, 40.0f)))
+        {
+            DismissNotice();
+        }
+    }
+
     void GuiApp::RenderContest()
     {
         ImGui::Text("%s", currentContestName.c_str());
@@ -1229,6 +1346,16 @@ namespace
         ImGui::TextDisabled("心态：%d / %d", mood, MOOD_LIMIT);
         ImGui::Separator();
         ImGui::TextWrapped("在这里切换题目并执行思考、写代码、对拍或提交等操作。");
+        ImGui::Spacing();
+
+        ImGui::BeginDisabled(timePoints != 0);
+        if (ImGui::Button("结束比赛", ImVec2(140.0f, 34.0f)))
+        {
+            FinalizeContest();
+            ImGui::EndDisabled();
+            return;
+        }
+        ImGui::EndDisabled();
         ImGui::Spacing();
 
         if (totalProblems > 1)

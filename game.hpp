@@ -44,6 +44,15 @@ inline std::map<std::string, int> currentShopPrices;
 // 日志
 inline std::vector<std::string> gameLog;
 
+struct PendingContestNotice {
+    bool active = false;
+    std::string title;
+    std::string description;
+    std::string effectText;
+};
+
+inline PendingContestNotice pendingContestNotice;
+
 // ========== 日志函数 ==========
 inline void logEvent(const std::string& message, const std::string& type = "") {
     std::string prefix;
@@ -101,6 +110,20 @@ inline int getContestIdByName(const std::string& contestName) {
 inline void pushLastAction(const std::string& action) {
     lastActions.push_back(action);
     if (lastActions.size() > 5) lastActions.erase(lastActions.begin());
+}
+
+inline void clearPendingContestNotice() {
+    pendingContestNotice = PendingContestNotice{};
+}
+
+inline bool hasPendingContestNotice() {
+    return pendingContestNotice.active;
+}
+
+inline PendingContestNotice consumePendingContestNotice() {
+    PendingContestNotice notice = pendingContestNotice;
+    clearPendingContestNotice();
+    return notice;
 }
 
 // ========== 计算函数（完全复制原版） ==========
@@ -161,14 +184,19 @@ inline std::string joinDisplayParts(const std::vector<std::string>& parts, const
 }
 
 inline int getBaseBlurLevel(const Problem& problem, const SubProblem& sp) {
-    if (sp.blur <= 0) return 0;
-    if (problem.level <= 4) return 1;
-    if (problem.level <= 7) return 2;
-    return 3;
+    (void)problem;
+    return std::max(0, sp.blur);
 }
 
 inline int getEffectiveBlurLevel(const Problem& problem, const SubProblem& sp) {
     return std::max(0, getBaseBlurLevel(problem, sp) - playerStats.experience);
+}
+
+inline std::string getBlurTraitText(const Problem& problem, const SubProblem& sp) {
+    const int baseBlur = getBaseBlurLevel(problem, sp);
+    const int effectiveBlur = getEffectiveBlurLevel(problem, sp);
+    if (sp.blur <= 0 || effectiveBlur <= 0) return "";
+    return "模糊:" + std::to_string(baseBlur) + "->" + std::to_string(effectiveBlur);
 }
 
 inline int getActiveBlurLevel(int problemIdx, int subProblemIdx) {
@@ -195,13 +223,15 @@ inline std::string buildSubProblemRequirementText(int problemIdx, int subProblem
     if (problemIdx < 0 || problemIdx >= static_cast<int>(subProblems.size())) return "无显式要求";
     if (subProblemIdx < 0 || subProblemIdx >= static_cast<int>(subProblems[problemIdx].size())) return "无显式要求";
 
+    const auto& problem = problems[problemIdx];
     const auto& sp = subProblems[problemIdx][subProblemIdx];
     const int activeBlur = getActiveBlurLevel(problemIdx, subProblemIdx);
     std::vector<std::string> requirements;
     std::vector<std::string> traits;
+    const std::string blurTraitText = getBlurTraitText(problem, sp);
 
     if (activeBlur >= 3) {
-        return "要求：模糊不清\n特性：模糊";
+        return blurTraitText.empty() ? "要求：模糊不清" : "要求：模糊不清\n特性：" + blurTraitText;
     }
 
     auto addRequirement = [&requirements](const std::string& label, int value, bool hidden) {
@@ -226,7 +256,7 @@ inline std::string buildSubProblemRequirementText(int problemIdx, int subProblem
         if (sp.inspire > 0) traits.push_back("激励:+" + std::to_string(sp.inspire));
     }
 
-    if (activeBlur > 0 && sp.blur > 0) traits.push_back("模糊");
+    if (!blurTraitText.empty()) traits.push_back(blurTraitText);
     if (activeBlur <= 2 && sp.independent == 0) traits.push_back("非独立");
 
     const std::string requirementText = requirements.empty() ? "无显式要求" : joinDisplayParts(requirements, "  ");
@@ -388,6 +418,10 @@ inline void triggerRandomEvent(int problemIdx, int subProblemIdx) {
         logEvent(event.description, "event");
         logEvent(event.effectText, "event");
         logEvent("当前心态值：" + std::to_string(mood), "event");
+        pendingContestNotice.active = true;
+        pendingContestNotice.title = "突发事件：" + event.name;
+        pendingContestNotice.description = event.description;
+        pendingContestNotice.effectText = event.effectText;
         return;
     }
 }
@@ -405,6 +439,7 @@ inline void startContest(int contestId) {
     codeProgress.clear();
     isCodeComplete.clear();
     errorRates.clear();
+    clearPendingContestNotice();
     
     totalProblems = (int)config.problemRanges.size();
     
@@ -1046,6 +1081,7 @@ inline void runGame() {
         logEvent("由于未进入省队，第一年的NOI阶段跳过", "event");
     }
 
+    logEvent("经过 1 年的学习与比赛历练，你对 OI 的理解更深了一层。", "event");
     addExperience(1, "升入高二");
     currentPhase = 17;
     logEvent("第九次训练开始...", "event");
