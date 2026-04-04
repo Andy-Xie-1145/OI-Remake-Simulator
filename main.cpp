@@ -68,7 +68,6 @@ namespace
         std::string currentEventKey;
         std::vector<EventOption> options;
         bool optionsFrozen = false;
-        bool awaitingContinue = false;
     };
 
     struct GameOverView
@@ -232,9 +231,8 @@ namespace
 
         void BeginTrainingPhase(int phase, int numEvents, const std::string &startLog);
         void StartTrainingEvent();
-        void FinishTrainingEvent();
         void SelectTrainingOption(size_t index);
-        void ContinueTrainingPhase();
+        void AdvanceToNextTrainingEvent();
 
         void BeginContestStep(int contestId);
         void FinalizeContest();
@@ -365,10 +363,10 @@ namespace
         if (eventIt == TRAINING_EVENTS.end())
         {
             logEvent("未知事件: " + training_.currentEventKey, "event");
-            training_.awaitingContinue = true;
             training_.options.clear();
             training_.optionsFrozen = false;
             training_.currentEventKey.clear();
+            AdvanceToNextTrainingEvent();
             return;
         }
 
@@ -376,9 +374,9 @@ namespace
         {
             if (training_.options.empty())
             {
-                training_.awaitingContinue = true;
                 training_.optionsFrozen = false;
                 training_.currentEventKey.clear();
+                AdvanceToNextTrainingEvent();
             }
             return;
         }
@@ -388,18 +386,26 @@ namespace
         if (training_.options.empty())
         {
             logEvent("事件没有可用选项: " + training_.currentEventKey, "event");
-            training_.awaitingContinue = true;
             training_.optionsFrozen = false;
             training_.currentEventKey.clear();
+            AdvanceToNextTrainingEvent();
         }
     }
 
-    void GuiApp::FinishTrainingEvent()
+    void GuiApp::AdvanceToNextTrainingEvent()
     {
-        training_.awaitingContinue = true;
         training_.options.clear();
         training_.optionsFrozen = false;
         training_.currentEventKey.clear();
+        training_.currentEventType.clear();
+        ++training_.currentEventNumber;
+        if (training_.currentEventNumber > training_.totalEvents)
+        {
+            training_ = TrainingView();
+            AdvanceStory();
+            return;
+        }
+        StartTrainingEvent();
     }
 
     void GuiApp::SelectTrainingOption(size_t index)
@@ -425,7 +431,7 @@ namespace
             {
                 logEvent("离开商店", "event");
                 clearShopState();
-                FinishTrainingEvent();
+                AdvanceToNextTrainingEvent();
                 return;
             }
 
@@ -466,7 +472,7 @@ namespace
             logEvent("当前决心值：" + std::to_string(playerStats.determination), "event");
             if (training_.options.empty())
             {
-                FinishTrainingEvent();
+                AdvanceToNextTrainingEvent();
             }
             return;
         }
@@ -495,26 +501,7 @@ namespace
             }
         }
 
-        FinishTrainingEvent();
-    }
-
-    void GuiApp::ContinueTrainingPhase()
-    {
-        if (!training_.awaitingContinue)
-            return;
-        training_.awaitingContinue = false;
-        training_.options.clear();
-        training_.optionsFrozen = false;
-        training_.currentEventKey.clear();
-        training_.currentEventType.clear();
-        ++training_.currentEventNumber;
-        if (training_.currentEventNumber > training_.totalEvents)
-        {
-            training_ = TrainingView();
-            AdvanceStory();
-            return;
-        }
-        StartTrainingEvent();
+        AdvanceToNextTrainingEvent();
     }
 
     void GuiApp::BeginContestStep(int contestId)
@@ -1267,25 +1254,10 @@ namespace
         ImGui::TextDisabled("当前大阶段：%d", currentPhase);
         ImGui::Separator();
 
-        if (training_.awaitingContinue)
-        {
-            if (ImGui::Button("继续..", ImVec2(140.0f, 38.0f)))
-            {
-                ContinueTrainingPhase();
-            }
-            return;
-        }
-
         auto eventIt = TRAINING_EVENTS.find(training_.currentEventKey);
         if (eventIt == TRAINING_EVENTS.end())
         {
-            ImGui::TextWrapped("当前训练事件无法加载。可以直接继续。");
-            ImGui::Spacing();
-            if (ImGui::Button("继续", ImVec2(140.0f, 38.0f)))
-            {
-                training_.awaitingContinue = true;
-                ContinueTrainingPhase();
-            }
+            ImGui::TextWrapped("当前训练事件无法加载，正在跳过。");
             return;
         }
 
@@ -1445,7 +1417,7 @@ namespace
             // 显示修改代码进度（如果已修改过）
             if (modificationCount[problemIdx][i] > 0)
             {
-                ImGui::Text("修改代码：%d次", modificationCount[problemIdx][i]);
+                ImGui::Text("修改代码：%d次（仅首次降低错误率）", modificationCount[problemIdx][i]);
             }
             ImGui::Text("思考成功率：%d%%", static_cast<int>(thinkRate * 100));
             ImGui::Text("写代码成功率：%d%%", static_cast<int>(codeRate * 100));

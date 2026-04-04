@@ -5,13 +5,10 @@
 #include "problem_pool.hpp"
 #include "events.hpp"
 #include <cctype>
-#include <iostream>
 #include <string>
 #include <vector>
-#include <iomanip>
 #include <algorithm>
 #include <set>
-#include <limits>
 
 // ========== 全局状态（完全复制原版变量） ==========
 inline PlayerStats playerStats;
@@ -65,25 +62,6 @@ inline void logEvent(const std::string& message, const std::string& type = "") {
     
     std::string fullMsg = prefix + message;
     gameLog.push_back(fullMsg);
-    std::cout << fullMsg << std::endl;
-}
-
-inline void waitForEnter(const std::string& prompt = "\n按回车继续...") {
-    std::cout << prompt;
-    if (std::cin.eof()) {
-        std::cout << "\n检测到输入结束，游戏退出。\n";
-        std::exit(0);
-    }
-    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-    if (std::cin.eof()) {
-        std::cout << "\n检测到输入结束，游戏退出。\n";
-        std::exit(0);
-    }
-    std::cin.get();
-    if (!std::cin && std::cin.eof()) {
-        std::cout << "\n检测到输入结束，游戏退出。\n";
-        std::exit(0);
-    }
 }
 
 inline double difficultyMultiplier() {
@@ -169,7 +147,7 @@ inline double calculateCodeSuccessRate(const SubProblem& sp) {
 
 inline double calculateLuckReduction() {
     if (playerStats.luck <= 0) return 0.0;
-    return std::log2(playerStats.luck + 1.0) * 0.006;  // Max 25% at luck=20
+    return std::min(0.45, std::log2(playerStats.luck + 1.0) * 0.095);  // luck=10 时约减少 33%
 }
 
 inline double calculateErrorRate(const SubProblem& sp) {
@@ -177,8 +155,8 @@ inline double calculateErrorRate(const SubProblem& sp) {
     double baseProb = 0.1;
     baseProb += sp.trap * 0.05;
     baseProb -= playerStats.carefulness * 0.03;
-    baseProb -= playerStats.luck * 0.02;  // Luck reduces error rate
     baseProb += std::pow(std::max(10 - mood, 0), 2) * 0.01;
+    baseProb *= (1.0 - calculateLuckReduction());
     return std::max(0.0, std::min(0.8, baseProb));
 }
 
@@ -307,33 +285,6 @@ inline bool isTopAwardForExperience(const std::string& contestType, const std::s
     return false;
 }
 
-// ========== UI显示函数（使用\t对齐） ==========
-
-inline void displayPlayerStatus() {
-    std::cout << "\n┌────────────────────────────────────────┐\n";
-    std::cout << "│\t玩家属性 [" << DIFFICULTY_SETTINGS.at(gameDifficulty).name << "难度]\t\t│\n";
-    std::cout << "├────────────────────────────────────────┤\n";
-    std::cout << "│\t决心: " << std::setw(5) << playerStats.determination << "\t\t\t│\n";
-    std::cout << "│\t心态: " << std::setw(2) << mood << "/" << MOOD_LIMIT << "\t\t\t\t│\n";
-    std::cout << "├────────────────────────────────────────┤\n";
-    std::cout << "│\t【知识点】\t\t\t\t│\n";
-    std::cout << "│\t  动态规划: " << std::setw(2) << playerStats.dp << "\t\t\t\t│\n";
-    std::cout << "│\t  数据结构: " << std::setw(2) << playerStats.ds << "\t\t\t\t│\n";
-    std::cout << "│\t  字符串: " << std::setw(2) << playerStats.string << "\t\t\t\t│\n";
-    std::cout << "│\t  图论: " << std::setw(2) << playerStats.graph << "\t\t\t\t│\n";
-    std::cout << "│\t  组合计数: " << std::setw(2) << playerStats.combinatorics << "\t\t\t│\n";
-    std::cout << "├────────────────────────────────────────┤\n";
-    std::cout << "│\t【能力】\t\t\t\t│\n";
-    std::cout << "│\t  思维: " << std::setw(2) << playerStats.thinking << "\t\t\t\t│\n";
-    std::cout << "│\t  代码: " << std::setw(2) << playerStats.coding << "\t\t\t\t│\n";
-    if (playerStats.carefulness > 0) std::cout << "│\t  细心: " << std::setw(2) << playerStats.carefulness << "\t\t\t\t│\n";
-    if (playerStats.quickness > 0) std::cout << "│\t  迅捷: " << std::setw(2) << playerStats.quickness << "\t\t\t\t│\n";
-    if (playerStats.mental > 0) std::cout << "│\t  心理素质: " << std::setw(2) << playerStats.mental << "\t\t\t│\n";
-    std::cout << "│\t  经验: " << std::setw(2) << playerStats.experience << "\t\t\t\t│\n";
-    std::cout << "│\t  经验积累: " << std::setw(2) << playerStats.tempExperience << "/6\t\t\t│\n";
-    if (playerStats.culture > 0) std::cout << "│\t  文化课: " << std::setw(2) << playerStats.culture << "\t\t\t│\n";
-    std::cout << "└────────────────────────────────────────┘\n";
-}
 
 inline void triggerRandomEvent(int problemIdx, int subProblemIdx) {
     if (timePoints <= 0) return;
@@ -490,52 +441,9 @@ inline void startContest(int contestId) {
     logEvent("进入考场，心态值-" + std::to_string(moodDrop) + "，当前心态值：" + std::to_string(mood), "event");
 }
 
-// 显示部分分状态
-inline void displaySubProblems() {
-    bool isIOIContest = false;
-    for (const auto& cfg : CONTEST_CONFIGS) {
-        if (cfg.second.name == currentContestName && cfg.second.isIOI) { isIOIContest = true; break; }
-    }
-    
-    if (currentProblem < 1 || currentProblem > (int)subProblems.size()) return;
-    int idx = currentProblem - 1;
-    
-    std::cout << "\n┌────────────────────────────────────────┐\n";
-    std::cout << "│\t" << problems[idx].name << " 部分分\t\t\t\t│\n";
-    std::cout << "└────────────────────────────────────────┘\n";
-    
-    for (size_t i = 0; i < subProblems[idx].size(); i++) {
-        const auto& sp = subProblems[idx][i];
-        int thinkTime = calculateThinkTime(sp);
-        int codeTime = calculateCodeTime(sp);
-        
-        std::cout << "\n部分分" << (i+1) << " (" << sp.score << "分):\n";
-        
-        if (isCodeComplete[idx][i]) { std::cout << "\t[✓已完成]\n"; continue; }
-        
-        std::string requirementText = buildSubProblemRequirementText(idx, static_cast<int>(i));
-        size_t newlinePos = 0;
-        while ((newlinePos = requirementText.find('\n', newlinePos)) != std::string::npos) {
-            requirementText.replace(newlinePos, 1, "\n\t");
-            newlinePos += 2;
-        }
-        std::cout << "\t" << requirementText << "\n";
-        
-        double thinkRate = calculateThinkSuccessRate(sp);
-        double codeRate = calculateCodeSuccessRate(sp);
-        
-        if (thinkProgress[idx][i] < thinkTime)
-            std::cout << "\t[" << (i+1) << "a] 思考 (" << thinkProgress[idx][i] << "/" << getThinkTimeDisplayTotal(idx, static_cast<int>(i)) << ", 成功率:" << (int)(thinkRate*100) << "%)\n";
-        if (thinkProgress[idx][i] >= thinkTime && codeProgress[idx][i] < codeTime)
-            std::cout << "\t[" << (i+1) << "b] 写代码 (" << codeProgress[idx][i] << "/" << codeTime << ", 成功率:" << (int)(codeRate*100) << "%)\n";
-        if (codeProgress[idx][i] >= codeTime)
-            std::cout << "\t[" << (i+1) << "c] " << (isIOIContest ? "提交" : "对拍") << " (出错概率:" << (errorRates[idx][i] >= 0 ? std::to_string((int)(errorRates[idx][i]*100)) : "?") << "%)\n";
-    }
-}
-
 // 思考部分分
 inline void thinkSubProblem(int problemIdx, int subProblemIdx) {
-    if (timePoints <= 0) { std::cout << "时间点不足！\n"; return; }
+    if (timePoints <= 0) return;
     const auto& sp = subProblems[problemIdx][subProblemIdx];
     double invalidProb = 1.0 - calculateThinkSuccessRate(sp);
     timePoints--;
@@ -566,7 +474,7 @@ inline void thinkSubProblem(int problemIdx, int subProblemIdx) {
 
 // 写代码部分分
 inline void writeCodeSubProblem(int problemIdx, int subProblemIdx) {
-    if (timePoints <= 0) { std::cout << "时间点不足！\n"; return; }
+    if (timePoints <= 0) return;
     const auto& sp = subProblems[problemIdx][subProblemIdx];
     double invalidProb = 1.0 - calculateCodeSuccessRate(sp);
     timePoints--;
@@ -600,7 +508,7 @@ inline void checkCodeSubProblem(int problemIdx, int subProblemIdx) {
     for (const auto& cfg : CONTEST_CONFIGS) {
         if (cfg.second.name == currentContestName && cfg.second.isIOI) { isIOIContest = true; break; }
     }
-    if (!isIOIContest && timePoints <= 0) { std::cout << "时间点不足！\n"; return; }
+    if (!isIOIContest && timePoints <= 0) return;
     if (!isIOIContest) timePoints--;
     
     pushLastAction("check");
@@ -641,23 +549,22 @@ inline void modifyCodeSubProblem(int problemIdx, int subProblemIdx) {
 
     timePoints -= timeCost;
 
-    // 保存原始错误率
     double originalErrorRate = errorRates[problemIdx][subProblemIdx];
-
-    // 计算改善：最多减少原错误率的50%，有递减效应
-    double diminishingReturns = std::pow(0.7, modificationCount[problemIdx][subProblemIdx]);
-    double improvement = originalErrorRate * 0.5 * diminishingReturns;  // 最多50%
-
-    errorRates[problemIdx][subProblemIdx] = std::max(0.0,
-        errorRates[problemIdx][subProblemIdx] - improvement);
+    if (modificationCount[problemIdx][subProblemIdx] == 0) {
+        errorRates[problemIdx][subProblemIdx] = std::max(0.0, originalErrorRate * 0.7);
+        logEvent("修改代码成功！出错概率从 " +
+                 std::to_string(static_cast<int>(originalErrorRate * 100)) +
+                 "% 降低到 " +
+                 std::to_string(static_cast<int>(errorRates[problemIdx][subProblemIdx] * 100)) +
+                 "%", "code");
+    } else {
+        logEvent("再次修改未发现新的问题，出错概率保持 " +
+                 std::to_string(static_cast<int>(originalErrorRate * 100)) +
+                 "%", "code");
+    }
 
     modificationCount[problemIdx][subProblemIdx]++;
-
-    logEvent("修改代码成功！出错概率从 " +
-             std::to_string(static_cast<int>(originalErrorRate * 100)) +
-             "% 降低到 " +
-             std::to_string(static_cast<int>(errorRates[problemIdx][subProblemIdx] * 100)) +
-             "%", "code");
+    hasAttemptedCheck[problemIdx][subProblemIdx] = false;  // 修改后必须重新对拍
 }
 
 inline bool isFullScore() {
@@ -743,163 +650,7 @@ inline std::string calculateAward(int score, const std::string& contestType) {
     return award;
 }
 
-// 显示比赛结果
-inline void showResults() {
-    const bool isIOIContest = isCurrentContestIOI();
-    int totalExpectedScore = 0;
-    int totalActualScore = 0;
-    
-    std::cout << "\n┌────────────────────────────────────────┐\n";
-    std::cout << "│\t比 赛 结 果\t\t\t\t│\n";
-    std::cout << "└────────────────────────────────────────┘\n";
-    
-    for (int i = 0; i < totalProblems; i++) {
-        int problemExpectedScore = 0;
-        int problemActualScore = 0;
-        for (size_t j = 0; j < subProblems[i].size(); j++) {
-            const auto& sp = subProblems[i][j];
-            bool codeCompleted = codeProgress[i][j] >= calculateCodeTime(sp);
-            bool checkCompleted = isCodeComplete[i][j];
-            if (codeCompleted) problemExpectedScore = std::max(problemExpectedScore, sp.score);
-            if (checkCompleted) {
-                problemActualScore = std::max(problemActualScore, sp.score);
-            } else if (codeCompleted && !isIOIContest) {
-                double successRate = 1.0 - errorRates[i][j];
-                for (int k = (int)j; k >= 0; --k) {
-                    if (Utils::randomBool(successRate)) {
-                        problemActualScore = std::max(problemActualScore, subProblems[i][k].score);
-                        break;
-                    }
-                }
-            }
-        }
-        totalExpectedScore += problemExpectedScore;
-        totalActualScore += problemActualScore;
-        std::cout << "T" << (i + 1) << " (" << problems[i].name << "): 预期 " << problemExpectedScore
-                  << " 分, 实际 " << problemActualScore << " 分\n";
-    }
-    
-    std::cout << "\n预期总分: " << totalExpectedScore << "\n";
-    std::cout << "实际总分: " << totalActualScore << "\n";
-
-    if (currentContestName == "省选Day2") {
-        playerStats.tempScore = totalActualScore + playerStats.prevScore + playerStats.noipScore;
-        std::cout << "省选总分: " << playerStats.tempScore << " (Day1 + Day2 + NOIP)\n";
-    } else if (currentContestName == "NOI Day2") {
-        playerStats.tempScore = totalActualScore + playerStats.prevScore + (playerStats.isProvincialTeamA ? 5 : 0);
-        std::cout << "NOI总分: " << playerStats.tempScore << "\n";
-    } else if (currentContestName == "IOI Day2") {
-        playerStats.tempScore = totalActualScore + playerStats.prevScore;
-        std::cout << "IOI总分: " << playerStats.tempScore << "\n";
-    } else if (currentContestName == "CTT Day4") {
-        playerStats.tempScore = totalActualScore + playerStats.prevScore1 + playerStats.prevScore2 + playerStats.prevScore3;
-        playerStats.cttScore = playerStats.tempScore;
-        std::cout << "CTT总分: " << playerStats.tempScore << "\n";
-    } else if (currentContestName == "CTS Day2") {
-        playerStats.tempScore = totalActualScore + playerStats.prevScore + playerStats.cttScore;
-        std::cout << "CTS总分: " << playerStats.tempScore << "\n";
-    }
-    
-    int detReward = totalActualScore * 5;
-    playerStats.determination += detReward;
-    std::cout << "决心奖励: +" << detReward << "\n";
-    
-    // 心态恢复
-    int minMood = std::min(5 + playerStats.mental, 10);
-    if (mood < minMood) {
-        int recovery = minMood - mood;
-        mood = minMood;
-        logEvent("比赛结束后心态自动恢复：+" + std::to_string(recovery) + "，当前心态值：" + std::to_string(mood), "event");
-    }
-    
-    bool isFinalDayContest =
-        currentContestName != "省选Day1" &&
-        currentContestName != "NOI Day1" &&
-        currentContestName != "IOI Day1" &&
-        currentContestName != "CTT Day1" &&
-        currentContestName != "CTT Day2" &&
-        currentContestName != "CTT Day3" &&
-        currentContestName != "CTS Day1";
-
-    if (isFinalDayContest) {
-        std::string award;
-        if (currentContestName == "省选Day2") award = calculateAward(totalActualScore, "省选");
-        else if (currentContestName == "NOI Day2") award = calculateAward(totalActualScore, "NOI");
-        else if (currentContestName == "IOI Day2") award = calculateAward(totalActualScore, "IOI");
-        else if (currentContestName == "CTT Day4") award = calculateAward(totalActualScore, "CTT");
-        else if (currentContestName == "CTS Day2") award = calculateAward(totalActualScore, "CTS");
-        else award = calculateAward(totalActualScore, currentContestName);
-
-        if (currentContestName == "CSP-S") playerStats.cspScore = totalActualScore;
-        else if (currentContestName == "NOIP") playerStats.noipScore = totalActualScore;
-
-        std::cout << "获奖情况: " << award << "\n";
-    } else {
-        playerStats.prevScore = totalActualScore;
-        if (currentContestName == "CTT Day1") playerStats.prevScore1 = totalActualScore;
-        else if (currentContestName == "CTT Day2") playerStats.prevScore2 = totalActualScore;
-        else if (currentContestName == "CTT Day3") playerStats.prevScore3 = totalActualScore;
-    }
-
-    logEvent("比赛结束！实际总分: " + std::to_string(totalActualScore), "event");
-}
-
-// 比赛主循环
-inline void runContestLoop(int contestId) {
-    startContest(contestId);
-    
-    while (timePoints > 0 && !isFullScore()) {
-        std::cout << "\n┌────────────────────────────────────────┐\n";
-        std::cout << "│\t" << currentContestName << "\t\t\t\t│\n";
-        std::cout << "│\t时间: " << std::setw(3) << timePoints << "  题目: T" << currentProblem << "\t\t\t│\n";
-        std::cout << "│\t决心: " << std::setw(5) << playerStats.determination;
-        std::cout << "  心态: " << mood << "/" << MOOD_LIMIT << "\t\t│\n";
-        std::cout << "└────────────────────────────────────────┘\n";
-        
-        displaySubProblems();
-        
-        std::cout << "\n操作: [数字][a/b/c/d] 或 [p]上一题 [n]下一题 [0]离场\n";
-        std::cout << "请选择: ";
-
-        std::string input = Utils::readToken();
-
-        if (input == "p") currentProblem = currentProblem > 1 ? currentProblem - 1 : totalProblems;
-        else if (input == "n") currentProblem = currentProblem < totalProblems ? currentProblem + 1 : 1;
-        else if (input == "0" && isFullScore()) break;
-        else if (input.length() >= 2 && std::isdigit(static_cast<unsigned char>(input[0]))) {
-            int subIdx = input[0] - '0' - 1;
-            char action = input[1];
-            if (subIdx >= 0 && subIdx < (int)subProblems[currentProblem-1].size()) {
-                if (action == 'a') thinkSubProblem(currentProblem - 1, subIdx);
-                else if (action == 'b') writeCodeSubProblem(currentProblem - 1, subIdx);
-                else if (action == 'c') checkCodeSubProblem(currentProblem - 1, subIdx);
-                else if (action == 'd' || action == 'D') {
-                    // 修改代码（仅非IOI比赛）
-                    bool isIOIContest = false;
-                    for (const auto& cfg : CONTEST_CONFIGS) {
-                        if (cfg.second.name == currentContestName && cfg.second.isIOI) {
-                            isIOIContest = true;
-                            break;
-                        }
-                    }
-                    if (!isIOIContest &&
-                        codeProgress[currentProblem - 1][subIdx] >= calculateCodeTime(subProblems[currentProblem - 1][subIdx]) &&
-                        hasAttemptedCheck[currentProblem - 1][subIdx] &&  // 必须已尝试对拍
-                        !isCodeComplete[currentProblem - 1][subIdx]) {
-                        modifyCodeSubProblem(currentProblem - 1, subIdx);
-                    } else {
-                        std::cout << "无法修改代码！\n";
-                    }
-                }
-            }
-        }
-    }
-    
-    showResults();
-    waitForEnter();
-}
-
-// ========== 获取训练事件类型（完全复制原版逻辑） ==========
+// ========== 获取训练事件类型（GUI 与共享逻辑共用） ==========
 inline std::string getTrainingEventType(int currentEvent, int /*totalEvents*/) {
     // 根据当前阶段和事件序号决定事件类型
     if (currentPhase == 1) { 
@@ -951,32 +702,6 @@ inline std::string getTrainingEventType(int currentEvent, int /*totalEvents*/) {
     return "提升训练";
 }
 
-// ========== 训练阶段 ==========
-inline void runTrainingPhase(int numEvents) {
-    totalTrainingEvents = numEvents;
-    for (int i = 0; i < numEvents; i++) {
-        int currentEvent = i + 1;
-        
-        // 清屏
-        clearScreen();
-        
-        std::cout << "\n┌────────────────────────────────────────┐\n";
-        std::cout << "│\t训练阶段 (" << currentEvent << "/" << numEvents << ")\t\t\t│\n";
-        std::cout << "└────────────────────────────────────────┘\n";
-        
-        // 根据阶段和事件序号选择事件类型（完全复制原版逻辑）
-        std::string eventType = getTrainingEventType(currentEvent, numEvents);
-        
-        logEvent("触发事件: " + eventType, "event");
-        
-        displayPlayerStatus();
-        
-        runEventChain(eventType);
-        
-        waitForEnter();
-    }
-}
-
 // ========== 游戏初始化和主流程 ==========
 
 inline void initGame() {
@@ -995,282 +720,5 @@ inline void initGame() {
     clearShopState();
 }
 
-inline void showTitle() {
-    std::cout << "\n┌────────────────────────────────────────────────┐\n";
-    std::cout << "│\t\t\t\t\t\t\t│\n";
-    std::cout << "│\t\tOI 重 开 模 拟 器 v2.0\t\t\t│\n";
-    std::cout << "│\t\t\t\t\t\t\t│\n";
-    std::cout << "│\t    重开你的人生，成为一名OIer\t\t\t│\n";
-    std::cout << "│\t\t\t\t\t\t\t│\n";
-    std::cout << "└────────────────────────────────────────────────┘\n\n";
-}
-
-inline void selectDifficulty() {
-    std::cout << "请选择游戏难度：\n";
-    std::cout << "  1. 简单 - 天赋点30，决心3000，分数线降低20%\n";
-    std::cout << "  2. 普通 - 天赋点20，决心1500，分数线降低10%\n";
-    std::cout << "  3. 困难 - 天赋点15，决心500，标准难度\n";
-    std::cout << "  4. 专家 - 天赋点15，决心0，分数线提高10%\n";
-    std::cout << "请输入(1-4): ";
-    
-    int choice = Utils::readIntInRange(1, 4);
-    
-    switch(choice) {
-        case 1: gameDifficulty = "easy"; break;
-        case 2: gameDifficulty = "normal"; break;
-        case 3: gameDifficulty = "hard"; break;
-        case 4: gameDifficulty = "expert"; break;
-        default: gameDifficulty = "hard";
-    }
-    
-    initGame();
-    logEvent("选择了" + DIFFICULTY_SETTINGS.at(gameDifficulty).name + "难度", "event");
-}
-
-inline void allocateTalent() {
-    auto settings = DIFFICULTY_SETTINGS.at(gameDifficulty);
-    int total = settings.talentPoints;
-    int remaining = total;
-    
-    std::cout << "\n分配你的初始天赋点！共 " << total << " 点。\n\n";
-    
-    int dp=0, ds=0, str=0, graph=0, comb=0;
-    
-    std::cout << "动态规划 (剩余 " << remaining << " 点): "; dp = Utils::readIntInRange(0, remaining); remaining -= dp;
-    std::cout << "数据结构 (剩余 " << remaining << " 点): "; ds = Utils::readIntInRange(0, remaining); remaining -= ds;
-    std::cout << "字符串 (剩余 " << remaining << " 点): "; str = Utils::readIntInRange(0, remaining); remaining -= str;
-    std::cout << "图论 (剩余 " << remaining << " 点): "; graph = Utils::readIntInRange(0, remaining); remaining -= graph;
-    std::cout << "组合计数 (剩余 " << remaining << " 点): "; comb = Utils::readIntInRange(0, remaining);
-    
-    playerStats.dp = dp;
-    playerStats.ds = ds;
-    playerStats.string = str;
-    playerStats.graph = graph;
-    playerStats.combinatorics = comb;
-    
-    displayPlayerStatus();
-}
-
-inline void showGameOver(const std::string& reason) {
-    std::cout << "\n┌────────────────────────────────────────┐\n";
-    std::cout << "│\t\t游 戏 结 束\t\t\t│\n";
-    std::cout << "└────────────────────────────────────────┘\n\n";
-    std::cout << reason << "\n\n";
-    
-    std::cout << "【你的成就】\n";
-    if (playerStats.achievements.empty()) {
-        std::cout << "  - 没有获得任何成就\n";
-    } else {
-        for (const auto& ach : playerStats.achievements) {
-            std::cout << "  - " << ach << "\n";
-        }
-    }
-    
-    std::cout << "\n";
-    if (playerStats.isIOIgold) std::cout << "你成功拿到了 IOI 金牌，最终还是站在了世界 OI 之巅。\n";
-    else if (playerStats.isNationalTeam) std::cout << "你成为了中国国家队选手，代表中国参加了 IOI。\n";
-    else if (playerStats.isTrainingTeam) std::cout << "你作为国家集训队选手，已经具备了保送资格。\n";
-    else if (playerStats.isProvincialTeam) std::cout << "作为省队选手，你在 OI 的道路上已经取得了不错的成绩。\n";
-    else std::cout << "虽然未能进入省队，但你依然收获了宝贵的经验。\n";
-}
-
-inline bool maybeRunContest(const std::string& contestName, const std::string& skipReason, bool condition) {
-    if (!condition) {
-        logEvent(skipReason + "，无法参加" + contestName + "比赛", "event");
-        return false;
-    }
-
-    int contestId = getContestIdByName(contestName);
-    if (contestId < 0) {
-        logEvent("未找到比赛配置：" + contestName, "event");
-        return false;
-    }
-
-    runContestLoop(contestId);
-    return true;
-}
-
-// ========== 主游戏流程 ==========
-inline void runGame() {
-    showTitle();
-    selectDifficulty();
-    allocateTalent();
-    waitForEnter("\n按回车开始游戏...");
-
-    currentPhase = 1;
-    logEvent("第一次训练开始...", "event");
-    runTrainingPhase(5);
-    runContestLoop(1);
-
-    currentPhase = 3;
-    logEvent("第二次训练开始...", "event");
-    runTrainingPhase(4);
-    if (playerStats.cspScore <= 0) {
-        logEvent("由于CSP-S成绩为零分，无法参加NOIP比赛", "event");
-        playerStats.noipScore = 0;
-    } else {
-        runContestLoop(2);
-    }
-
-    currentPhase = 5;
-    logEvent("第三次训练开始...", "event");
-    runTrainingPhase(4);
-    maybeRunContest("WC", "由于CSP-S成绩未达到二等奖及以上", playerStats.cspScore >= 180 * difficultyMultiplier());
-
-    currentPhase = 7;
-    logEvent("第四次训练开始...", "event");
-    runTrainingPhase(4);
-    runContestLoop(4);
-
-    currentPhase = 9;
-    logEvent("第五次训练开始...", "event");
-    runTrainingPhase(2);
-    runContestLoop(5);
-
-    currentPhase = 11;
-    logEvent("第六次训练开始...", "event");
-    runTrainingPhase(4);
-    maybeRunContest("APIO", "由于NOIP成绩未达到二等奖及以上", playerStats.noipScore >= 180 * difficultyMultiplier());
-
-    if (playerStats.isProvincialTeam) {
-        currentPhase = 13;
-        logEvent("第七次训练开始...", "event");
-        runTrainingPhase(4);
-        runContestLoop(7);
-
-        currentPhase = 15;
-        logEvent("第八次训练开始...", "event");
-        runTrainingPhase(2);
-        runContestLoop(8);
-    } else {
-        logEvent("由于未进入省队，第一年的NOI阶段跳过", "event");
-    }
-
-    logEvent("经过 1 年的学习与比赛历练，你对 OI 的理解更深了一层。", "event");
-    addExperience(1, "升入高二");
-    currentPhase = 17;
-    logEvent("第九次训练开始...", "event");
-    runTrainingPhase(8);
-    runContestLoop(1);
-
-    currentPhase = 19;
-    logEvent("第十次训练开始...", "event");
-    runTrainingPhase(5);
-    if (playerStats.cspScore <= 0 && !playerStats.isTrainingTeam) {
-        logEvent("由于CSP-S成绩为零分，无法参加NOIP比赛", "event");
-        playerStats.noipScore = 0;
-    } else {
-        runContestLoop(2);
-    }
-
-    if (playerStats.isTrainingTeam) {
-        currentPhase = 21;
-        logEvent("第十一次训练开始...", "event");
-        runTrainingPhase(1);
-        runContestLoop(9);
-        runContestLoop(10);
-        runContestLoop(11);
-        runContestLoop(12);
-
-        if (playerStats.isCandidateTeam) {
-            currentPhase = 26;
-            logEvent("第十二次训练开始...", "event");
-            runTrainingPhase(4);
-            runContestLoop(13);
-            runContestLoop(14);
-        } else {
-            currentPhase = 29;
-            logEvent("第十二次训练开始...", "event");
-            runTrainingPhase(4);
-            maybeRunContest("WC", "由于CSP-S成绩未达到二等奖及以上", playerStats.cspScore >= 180 * difficultyMultiplier());
-        }
-    } else {
-        currentPhase = 29;
-        logEvent("第十一次训练开始...", "event");
-        runTrainingPhase(4);
-        maybeRunContest("WC", "由于CSP-S成绩未达到二等奖及以上", playerStats.cspScore >= 180 * difficultyMultiplier());
-    }
-
-    currentPhase = 31;
-    logEvent("第十三次训练开始...", "event");
-    runTrainingPhase(5);
-    playerStats.isProvincialTeam = false;
-    playerStats.isProvincialTeamA = false;
-    runContestLoop(4);
-
-    currentPhase = 33;
-    logEvent("第十五次训练开始...", "event");
-    runTrainingPhase(2);
-    runContestLoop(5);
-
-    if (!playerStats.isProvincialTeam && !playerStats.isNationalTeam) {
-        showGameOver("在高二省选中未能进入省队");
-        return;
-    }
-
-    currentPhase = 35;
-    logEvent("第十六次训练开始...", "event");
-    runTrainingPhase(4);
-    runContestLoop(6);
-
-    currentPhase = 38;
-    logEvent("第十七次训练开始...", "event");
-    runTrainingPhase(5);
-    playerStats.isTrainingTeam = false;
-    runContestLoop(7);
-
-    currentPhase = 40;
-    logEvent("第十八次训练开始...", "event");
-    runTrainingPhase(2);
-    runContestLoop(8);
-
-    if (playerStats.isNationalTeam) {
-        currentPhase = 42;
-        logEvent("第十九次训练开始...", "event");
-        runTrainingPhase(6);
-        runContestLoop(15);
-        runContestLoop(16);
-        if (playerStats.isIOIgold || !playerStats.isTrainingTeam) {
-            showGameOver("完成IOI比赛");
-            return;
-        }
-    } else if (!playerStats.isTrainingTeam) {
-        showGameOver("完成NOI比赛");
-        return;
-    }
-
-    currentPhase = 45;
-    logEvent("第二十次训练开始...", "event");
-    runTrainingPhase(1);
-    playerStats.isCandidateTeam = false;
-    runContestLoop(9);
-    runContestLoop(10);
-    runContestLoop(11);
-    runContestLoop(12);
-
-    if (!playerStats.isCandidateTeam) {
-        showGameOver("未能进入候选队");
-        return;
-    }
-
-    currentPhase = 50;
-    logEvent("第二十一次训练开始...", "event");
-    runTrainingPhase(4);
-    playerStats.isNationalTeam = false;
-    runContestLoop(13);
-    runContestLoop(14);
-
-    if (!playerStats.isNationalTeam) {
-        showGameOver("未能进入国家队");
-        return;
-    }
-
-    currentPhase = 53;
-    logEvent("第二十二次训练开始...", "event");
-    runTrainingPhase(6);
-    runContestLoop(15);
-    runContestLoop(16);
-    showGameOver("完成IOI比赛");
-}
 
 #endif // GAME_HPP
