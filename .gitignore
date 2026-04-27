@@ -50,6 +50,7 @@ cmake-build-*/
 .vscode/
 .claude/
 *.claude
+CLAUDE.md
 *.suo
 *.user
 *.sln.docstates
