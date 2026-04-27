@@ -31,6 +31,9 @@ namespace
     enum class GuiScreen
     {
         Home,
+        Difficulty,
+        IntroStory,
+        Help,
         Talent,
         Training,
         Notice,
@@ -38,6 +41,18 @@ namespace
         ContestResult,
         GameOver
     };
+
+    constexpr const char *kGameVersion = "v0.1.4-beta-2";
+    constexpr const char *kIntroStoryText =
+        "我重生了？\n"
+        "参加完 2077 年的省队选拔后，高二的你意识到自己无缘今年省队了。也许从此就和 OI 无缘了。\n\n"
+        "你躺在床上，闭上眼，回想起自己曾经在 OI 赛场上挥洒汗水的场景。\n\n"
+        "眼泪还是流了出来。你不甘心，你觉得你还可以做得更好。\n\n"
+        "你突然惊醒，发现自己回到了高一前的暑假。\n\n"
+        "之前经历的一切仿佛是一场梦，却又那么真实。\n\n"
+        "你意识到，这一次，你还有机会。\n\n"
+        "你决定，这一次，让 OI 生涯不留遗憾。\n\n"
+        "你充满了决心。";
 
     struct ContestProblemResult
     {
@@ -112,6 +127,9 @@ namespace
         codeProgress.clear();
         isCodeComplete.clear();
         errorRates.clear();
+        modificationCount.clear();
+        hasAttemptedCheck.clear();
+        requiresCodeModification.clear();
         lastActions.clear();
         currentPhase = 1;
         totalTrainingEvents = 5;
@@ -221,6 +239,7 @@ namespace
         GameOverView gameOver_;
         bool gameInitialized_ = false;
         std::string fontWarning_;
+        GuiScreen helpReturnScreen_ = GuiScreen::Home;
 
         void ResetToHome();
         int TalentBudget() const;
@@ -242,9 +261,13 @@ namespace
         void AdvanceStory();
         void ShowNotice(NoticeView notice);
         void DismissNotice();
+        void OpenHelp();
 
         void RenderTopBar();
         void RenderHome();
+        void RenderDifficulty();
+        void RenderIntroStory();
+        void RenderHelp();
         void RenderTalent();
         void RenderTraining();
         void RenderNotice();
@@ -252,6 +275,7 @@ namespace
         void RenderContestResult();
         void RenderGameOver();
         void RenderSidebar();
+        void RenderHelpCard();
         void RenderPlayerCard();
         void RenderFlagsCard();
         void RenderLogsCard();
@@ -306,6 +330,7 @@ namespace
         contestResult_ = ContestResultView();
         gameOver_ = GameOverView();
         gameInitialized_ = false;
+        helpReturnScreen_ = GuiScreen::Home;
     }
 
     void GuiApp::BeginSetup()
@@ -320,7 +345,7 @@ namespace
         contestResult_ = ContestResultView();
         gameOver_ = GameOverView();
         gameInitialized_ = true;
-        screen_ = GuiScreen::Talent;
+        screen_ = GuiScreen::IntroStory;
     }
 
     void GuiApp::ApplyTalentAllocation()
@@ -331,6 +356,14 @@ namespace
         playerStats.graph = talents_[3];
         playerStats.combinatorics = talents_[4];
         AdvanceStory();
+    }
+
+    void GuiApp::OpenHelp()
+    {
+        if (screen_ == GuiScreen::Help)
+            return;
+        helpReturnScreen_ = screen_;
+        screen_ = GuiScreen::Help;
     }
     void GuiApp::BeginTrainingPhase(int phase, int numEvents, const std::string &startLog)
     {
@@ -1109,6 +1142,15 @@ namespace
         case GuiScreen::Home:
             RenderHome();
             break;
+        case GuiScreen::Difficulty:
+            RenderDifficulty();
+            break;
+        case GuiScreen::IntroStory:
+            RenderIntroStory();
+            break;
+        case GuiScreen::Help:
+            RenderHelp();
+            break;
         case GuiScreen::Talent:
             RenderTalent();
             break;
@@ -1146,7 +1188,7 @@ namespace
     {
         ImGui::TextUnformatted("OI 重开模拟器 GUI");
         ImGui::SameLine();
-    ImGui::TextDisabled("基于核心数值与题库");
+        ImGui::TextDisabled("基于核心数值与题库");
 
         if (!fontWarning_.empty())
         {
@@ -1154,13 +1196,36 @@ namespace
             ImGui::TextColored(ImVec4(0.95f, 0.78f, 0.25f, 1.0f), "%s", fontWarning_.c_str());
         }
 
-        if (screen_ != GuiScreen::Home)
+        const bool showHelpButton = screen_ != GuiScreen::Help;
+        const bool showHomeButton = screen_ != GuiScreen::Home;
+        const int buttonCount = static_cast<int>(showHelpButton) + static_cast<int>(showHomeButton);
+        if (buttonCount > 0)
         {
+            const float buttonWidth = 96.0f;
+            const float spacing = 8.0f;
+            const float totalWidth = buttonWidth * buttonCount + spacing * (buttonCount - 1);
             ImGui::SameLine();
-            ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 120.0f);
-            if (ImGui::Button("返回首页", ImVec2(96.0f, 0.0f)))
+            ImGui::SetCursorPosX(ImGui::GetWindowWidth() - totalWidth - 16.0f);
+
+            if (showHelpButton)
             {
-                ResetToHome();
+                if (ImGui::Button("帮助", ImVec2(buttonWidth, 0.0f)))
+                {
+                    OpenHelp();
+                }
+            }
+
+            if (showHelpButton && showHomeButton)
+            {
+                ImGui::SameLine();
+            }
+
+            if (showHomeButton)
+            {
+                if (ImGui::Button("返回首页", ImVec2(buttonWidth, 0.0f)))
+                {
+                    ResetToHome();
+                }
             }
         }
 
@@ -1170,9 +1235,23 @@ namespace
     void GuiApp::RenderHome()
     {
         ImGui::Spacing();
-        ImGui::TextUnformatted("开始游戏");
+        ImGui::Text("OI重开模拟器[%s]", kGameVersion);
         ImGui::Separator();
-        ImGui::TextWrapped("选择难度后开始新的一局。训练、比赛和结算都可以直接在界面中操作。");
+        ImGui::TextWrapped("一次重新来过的 OI 生涯，从这里开始。");
+        ImGui::Spacing();
+
+        if (ImGui::Button("开始游戏", ImVec2(180.0f, 44.0f)))
+        {
+            screen_ = GuiScreen::Difficulty;
+        }
+    }
+
+    void GuiApp::RenderDifficulty()
+    {
+        ImGui::Spacing();
+        ImGui::TextUnformatted("选择难度");
+        ImGui::Separator();
+        ImGui::TextWrapped("选择难度后进入开局剧情。");
         ImGui::Spacing();
 
         static const std::array<std::pair<const char *, const char *>, 4> difficultyOrder = {{{"easy", "简单：天赋点 30，初始决心 3000，分数线降低 20%"},
@@ -1206,9 +1285,90 @@ namespace
         ImGui::Spacing();
         ImGui::Spacing();
 
-        if (ImGui::Button("开始新的一局", ImVec2(180.0f, 44.0f)))
+        if (ImGui::Button("进入剧情", ImVec2(180.0f, 44.0f)))
         {
             BeginSetup();
+        }
+    }
+
+    void GuiApp::RenderIntroStory()
+    {
+        ImGui::Spacing();
+        ImGui::TextUnformatted("重开");
+        ImGui::Separator();
+        ImGui::BeginChild("intro_story_card", ImVec2(0.0f, 420.0f), true);
+        ImGui::TextWrapped("%s", kIntroStoryText);
+        ImGui::EndChild();
+        ImGui::Spacing();
+
+        if (ImGui::Button("开始训练", ImVec2(180.0f, 44.0f)))
+        {
+            screen_ = GuiScreen::Talent;
+        }
+    }
+
+    void GuiApp::RenderHelp()
+    {
+        ImGui::TextUnformatted("帮助");
+        ImGui::Separator();
+        ImGui::TextWrapped("这里汇总了开局、训练、比赛和关键机制的说明。右侧边栏也会根据当前界面给出速查提示。");
+        ImGui::Spacing();
+
+        if (ImGui::CollapsingHeader("流程概览", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            ImGui::BulletText("首页 -> 难度选择 -> 剧情 -> 天赋分配 -> 训练/比赛推进。");
+            ImGui::BulletText("训练阶段主要获取属性、决心和特殊成长。");
+            ImGui::BulletText("比赛阶段通过思考、写代码、对拍或提交拿分。");
+        }
+
+        if (ImGui::CollapsingHeader("训练说明", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            ImGui::BulletText("选项下方的“效果”会显示确定收益；出现“?”表示还有随机或隐藏后果。");
+            ImGui::BulletText("决心主要用于商店和部分事件，心态会影响比赛表现。");
+            ImGui::BulletText("经验用于对抗模糊，经验积累达到 6 会转化为 1 点经验。");
+        }
+
+        if (ImGui::CollapsingHeader("比赛说明", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            ImGui::BulletText("标准流程通常是：思考 -> 写代码 -> 对拍/提交。");
+            ImGui::BulletText("思维影响思考成功率，代码影响写代码成功率，细心影响对拍/提交稳定性。");
+            ImGui::BulletText("IOI 赛制在时间为 0 时仍可继续提交；其他赛制时间为 0 后只能结束比赛。");
+            ImGui::BulletText("非 IOI 比赛对拍失败后，必须先修改代码，才能再次对拍。");
+            ImGui::BulletText("修改代码每次消耗 1 时间点，并按写代码成功率判定是否推进返工进度。");
+            ImGui::BulletText("需要累计完成 分支+1 次成功修改，才会重新生成一版代码并恢复对拍资格。");
+        }
+
+        if (ImGui::CollapsingHeader("属性速览", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            ImGui::BulletText("动态规划 / 数据结构 / 字符串 / 图论 / 组合计数：对应知识方向的个人能力。能力越高，处理相关题型时思考耗时越少。");
+            ImGui::BulletText("思维：影响思考成功率。");
+            ImGui::BulletText("代码：影响写代码成功率。");
+            ImGui::BulletText("细心：降低对拍或提交翻车概率。");
+            ImGui::BulletText("迅捷：降低写代码耗时。");
+            ImGui::BulletText("心理素质：降低心态崩盘风险。");
+            ImGui::BulletText("运气：降低负面随机事件和部分失败概率。");
+            ImGui::BulletText("经验：抵消模糊等级，模糊被完全抵消后会恢复完整信息。");
+        }
+
+        if (ImGui::CollapsingHeader("题目属性", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            ImGui::BulletText("动态规划 / 数据结构 / 字符串 / 图论 / 组合计数：这部分分主要考察的知识方向及要求强度。要求越高，而你的对应能力越不足，思考这部分分时花费的时间就越多。");
+            ImGui::BulletText("思维：这部分分对理解、转化和发现关键做法的要求。数值越高，思考成功率越低。");
+            ImGui::BulletText("代码：这部分分的实现工作量。数值越高，写代码所需的进度越多。");
+            ImGui::BulletText("细节：这部分分在实现上的繁琐程度和出错空间。数值越高，写代码成功率越低。");
+            ImGui::BulletText("陷阱：这部分分暗坑、卡点和隐藏错误的强度。数值越高，对拍或提交时翻车概率越高。");
+            ImGui::BulletText("模糊：题目描述中对难度和知识点信息的隐藏程度。等级越高，你能直接看到的要求和特性越少；如果你有足够的经验，这些模糊描述就骗不了你。");
+            ImGui::BulletText("分支：这部分分可能解法之间区别的复杂程度。数值越高，对拍失败后需要完成的修改次数越多。");
+            ImGui::BulletText("激励：取得进展时带来的正反馈强度。数值越高，写完代码或对拍成功后恢复的心态越多。");
+            ImGui::BulletText("红温：失败后的心态冲击强度。数值越高，思考失败或写代码失败时额外损失的心态越多。");
+            ImGui::BulletText("Adhoc：这部分分对临场观察、构造、找性质等非模板化能力的要求。数值越高，思考耗时越长。");
+            ImGui::BulletText("非独立：这部分分与前面的相关部分分存在联动。成功推进它时，可能会顺带推进前面同类的非独立部分分。");
+        }
+
+        ImGui::Spacing();
+        if (ImGui::Button("返回上一页", ImVec2(160.0f, 40.0f)))
+        {
+            screen_ = helpReturnScreen_;
         }
     }
 
@@ -1396,8 +1556,12 @@ namespace
             const bool canThink = !completed && thinkProgress[problemIdx][i] < thinkTime && timePoints > 0;
             const bool canCode = !completed && thinkProgress[problemIdx][i] >= thinkTime &&
                                  codeProgress[problemIdx][i] < codeTime && timePoints > 0;
+            const bool mustModifyBeforeRecheck = !completed && !isCurrentContestIOI() &&
+                                                 requiresCodeModification[problemIdx][i];
+            const int requiredFixes = sp.branch + 1;
             const bool canCheck = !completed && codeProgress[problemIdx][i] >= codeTime &&
-                                  (isCurrentContestIOI() || timePoints > 0);
+                                  (isCurrentContestIOI() || timePoints > 0) &&
+                                  !mustModifyBeforeRecheck;
 
             ImGui::PushID(static_cast<int>(i));
             ImGui::BeginChild("subproblem_card", ImVec2(0.0f, 267.0f), true);
@@ -1414,10 +1578,9 @@ namespace
             const std::string thinkTotalText = getThinkTimeDisplayTotal(problemIdx, static_cast<int>(i));
             ImGui::Text("思考进度：%d / %s", thinkProgress[problemIdx][i], thinkTotalText.c_str());
             ImGui::Text("代码进度：%d / %d", codeProgress[problemIdx][i], codeTime);
-            // 显示修改代码进度（如果已修改过）
-            if (modificationCount[problemIdx][i] > 0)
+            if (mustModifyBeforeRecheck || modificationCount[problemIdx][i] > 0)
             {
-                ImGui::Text("修改代码：%d次（仅首次降低错误率）", modificationCount[problemIdx][i]);
+                ImGui::Text("修改进度：%d / %d", modificationCount[problemIdx][i], requiredFixes);
             }
             ImGui::Text("思考成功率：%d%%", static_cast<int>(thinkRate * 100));
             ImGui::Text("写代码成功率：%d%%", static_cast<int>(codeRate * 100));
@@ -1429,6 +1592,10 @@ namespace
             else
             {
                 ImGui::Text("%s出错概率：?", isCurrentContestIOI() ? "提交" : "对拍");
+            }
+            if (mustModifyBeforeRecheck)
+            {
+                ImGui::TextColored(ImVec4(0.92f, 0.56f, 0.24f, 1.0f), "需要先修改代码，才能再次对拍");
             }
 
             ImGui::Spacing();
@@ -1458,15 +1625,14 @@ namespace
             // 修改代码按钮（仅非IOI比赛，对拍失败后）
             const bool canModify = !completed &&
                                    codeProgress[problemIdx][i] >= codeTime &&
-                                   hasAttemptedCheck[problemIdx][i] &&  // 已尝试对拍
-                                   !isCodeComplete[problemIdx][i] &&    // 对拍未成功
-                                   !isCurrentContestIOI();              // 非IOI比赛
+                                   requiresCodeModification[problemIdx][i] &&
+                                   !isCurrentContestIOI() &&
+                                   timePoints > 0;
             if (canModify)
             {
                 ImGui::SameLine();
-                const int timeCost = 1 + sp.branch;
                 ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.1f, 0.6f, 0.6f));
-                if (ImGui::Button(("修改代码 (" + std::to_string(timeCost) + "时间)").c_str(), ImVec2(130.0f, 30.0f)))
+                if (ImGui::Button("修改代码 (1时间)", ImVec2(130.0f, 30.0f)))
                 {
                     ModifyCodeProblem(problemIdx, static_cast<int>(i));
                 }
@@ -1569,7 +1735,37 @@ namespace
         ImGui::Spacing();
         RenderFlagsCard();
         ImGui::Spacing();
+        RenderHelpCard();
+        ImGui::Spacing();
         RenderLogsCard();
+    }
+
+    void GuiApp::RenderHelpCard()
+    {
+        ImGui::TextUnformatted("帮助速查");
+        ImGui::Separator();
+
+        if (screen_ == GuiScreen::Training)
+        {
+            ImGui::TextWrapped("训练选项下方会显示“效果”。“?” 代表随机或隐藏结果。");
+            ImGui::TextWrapped("决心主要用于商店，经验用于对抗模糊。");
+        }
+        else if (screen_ == GuiScreen::Contest)
+        {
+            ImGui::TextWrapped("比赛通常按“思考 -> 写代码 -> 对拍/提交”推进。");
+            ImGui::TextWrapped("非 IOI 对拍失败后，必须先修改代码，才能再次对拍。");
+            ImGui::TextWrapped("修改代码每次消耗 1 时间点，成功才会推进返工进度。");
+        }
+        else
+        {
+            ImGui::TextWrapped("这里会根据当前页面显示简短帮助。完整规则可打开帮助页查看。");
+        }
+
+        ImGui::Spacing();
+        if (ImGui::Button("打开完整帮助", ImVec2(140.0f, 34.0f)))
+        {
+            OpenHelp();
+        }
     }
 
     void GuiApp::RenderPlayerCard()

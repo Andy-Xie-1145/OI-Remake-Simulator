@@ -29,6 +29,7 @@ inline std::vector<std::vector<bool>> isCodeComplete;
 inline std::vector<std::vector<double>> errorRates;
 inline std::vector<std::vector<int>> modificationCount;  // 修改代码次数跟踪
 inline std::vector<std::vector<bool>> hasAttemptedCheck;  // 是否已尝试对拍
+inline std::vector<std::vector<bool>> requiresCodeModification;  // 是否必须返工后才能再次对拍
 
 // 操作记录
 inline std::vector<std::string> lastActions;
@@ -402,6 +403,7 @@ inline void startContest(int contestId) {
     errorRates.clear();
     modificationCount.clear();
     hasAttemptedCheck.clear();  // 清除对拍标志
+    requiresCodeModification.clear();
     clearPendingContestNotice();
     
     totalProblems = (int)config.problemRanges.size();
@@ -430,6 +432,7 @@ inline void startContest(int contestId) {
         errorRates.push_back(std::vector<double>(prob.parts.size(), -1.0));
         modificationCount.push_back(std::vector<int>(prob.parts.size(), 0));  // 初始化修改计数
         hasAttemptedCheck.push_back(std::vector<bool>(prob.parts.size(), false));  // 初始化对拍标志
+        requiresCodeModification.push_back(std::vector<bool>(prob.parts.size(), false));
     }
     
     // 心态下降
@@ -508,6 +511,10 @@ inline void checkCodeSubProblem(int problemIdx, int subProblemIdx) {
     for (const auto& cfg : CONTEST_CONFIGS) {
         if (cfg.second.name == currentContestName && cfg.second.isIOI) { isIOIContest = true; break; }
     }
+    if (!isIOIContest && requiresCodeModification[problemIdx][subProblemIdx]) {
+        logEvent("需要先修改代码，才能再次对拍！", "check");
+        return;
+    }
     if (!isIOIContest && timePoints <= 0) return;
     if (!isIOIContest) timePoints--;
     
@@ -523,8 +530,13 @@ inline void checkCodeSubProblem(int problemIdx, int subProblemIdx) {
             mood = std::max(0, mood - 1);
             logEvent("服务器爆炸，心态-1", "check");
         } else {
-            // 对拍/提交失败，但不减少代码进度（移除fallback惩罚）
-            logEvent((isIOIContest ? "提交" : "对拍") + std::string("失败！可以尝试修改代码"), "check");
+            if (!isIOIContest) {
+                requiresCodeModification[problemIdx][subProblemIdx] = true;
+                modificationCount[problemIdx][subProblemIdx] = 0;
+                logEvent("对拍失败！需要修改代码后才能再次对拍", "check");
+            } else {
+                logEvent("提交失败！", "check");
+            }
         }
     } else {
         const auto& sp = subProblems[problemIdx][subProblemIdx];
@@ -538,9 +550,14 @@ inline void checkCodeSubProblem(int problemIdx, int subProblemIdx) {
 // 修改代码
 inline void modifyCodeSubProblem(int problemIdx, int subProblemIdx) {
     const SubProblem& sp = subProblems[problemIdx][subProblemIdx];
+    const int requiredFixes = sp.branch + 1;
 
-    // 时间成本：1 + 分支值（简单直接，不受迅捷影响）
-    int timeCost = 1 + sp.branch;
+    if (!requiresCodeModification[problemIdx][subProblemIdx]) {
+        logEvent("当前不需要修改代码。", "code");
+        return;
+    }
+
+    int timeCost = 1;
 
     if (timePoints < timeCost) {
         logEvent("时间点不足，无法修改代码！", "code");
@@ -548,23 +565,25 @@ inline void modifyCodeSubProblem(int problemIdx, int subProblemIdx) {
     }
 
     timePoints -= timeCost;
-
-    double originalErrorRate = errorRates[problemIdx][subProblemIdx];
-    if (modificationCount[problemIdx][subProblemIdx] == 0) {
-        errorRates[problemIdx][subProblemIdx] = std::max(0.0, originalErrorRate * 0.7);
-        logEvent("修改代码成功！出错概率从 " +
-                 std::to_string(static_cast<int>(originalErrorRate * 100)) +
-                 "% 降低到 " +
-                 std::to_string(static_cast<int>(errorRates[problemIdx][subProblemIdx] * 100)) +
-                 "%", "code");
+    double invalidProb = 1.0 - calculateCodeSuccessRate(sp);
+    if (Utils::randomBool(invalidProb)) {
+        logEvent("修改代码失败！当前进度 " +
+                 std::to_string(modificationCount[problemIdx][subProblemIdx]) + " / " +
+                 std::to_string(requiredFixes), "code");
     } else {
-        logEvent("再次修改未发现新的问题，出错概率保持 " +
-                 std::to_string(static_cast<int>(originalErrorRate * 100)) +
-                 "%", "code");
-    }
+        modificationCount[problemIdx][subProblemIdx]++;
+        logEvent("修改代码成功！当前进度 " +
+                 std::to_string(modificationCount[problemIdx][subProblemIdx]) + " / " +
+                 std::to_string(requiredFixes), "code");
 
-    modificationCount[problemIdx][subProblemIdx]++;
-    hasAttemptedCheck[problemIdx][subProblemIdx] = false;  // 修改后必须重新对拍
+        if (modificationCount[problemIdx][subProblemIdx] >= requiredFixes) {
+            requiresCodeModification[problemIdx][subProblemIdx] = false;
+            hasAttemptedCheck[problemIdx][subProblemIdx] = false;
+            errorRates[problemIdx][subProblemIdx] = calculateErrorRate(sp);
+            logEvent("已完成全部修改，可再次对拍。新的出错概率为 " +
+                     std::to_string(static_cast<int>(errorRates[problemIdx][subProblemIdx] * 100)) + "%", "code");
+        }
+    }
 }
 
 inline bool isFullScore() {
