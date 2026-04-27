@@ -46,7 +46,25 @@ inline void clearShopState() {
     purchasedItems.clear();
 }
 
+// applyStatDelta 中受 bounds [0, 20] 限制的属性成员指针映射
+inline const std::map<std::string, int PlayerStats::*> STAT_MEMBER_MAP = {
+    {"dp", &PlayerStats::dp},
+    {"ds", &PlayerStats::ds},
+    {"string", &PlayerStats::string},
+    {"graph", &PlayerStats::graph},
+    {"combinatorics", &PlayerStats::combinatorics},
+    {"thinking", &PlayerStats::thinking},
+    {"coding", &PlayerStats::coding},
+    {"carefulness", &PlayerStats::carefulness},
+    {"quickness", &PlayerStats::quickness},
+    {"mental", &PlayerStats::mental},
+    {"experience", &PlayerStats::experience},
+    {"culture", &PlayerStats::culture},
+    {"luck", &PlayerStats::luck},
+};
+
 inline void applyStatDelta(const std::string& key, int value, const std::string& optionText) {
+    // mood 特殊处理
     if (key == "mood") {
         if (optionText == "缓和心态") {
             mood = std::max(0, std::min(MOOD_LIMIT, value));
@@ -56,28 +74,18 @@ inline void applyStatDelta(const std::string& key, int value, const std::string&
         return;
     }
 
+    // determination 特殊处理（不受 bounds 限制）
     if (key == "determination") {
         playerStats.determination = std::max(0, playerStats.determination + value);
         return;
     }
 
-    auto applyBounded = [value](int& target) {
+    // 其余属性通过成员指针映射查找
+    auto it = STAT_MEMBER_MAP.find(key);
+    if (it != STAT_MEMBER_MAP.end()) {
+        int& target = playerStats.*(it->second);
         target = std::max(0, std::min(20, target + value));
-    };
-
-    if (key == "dp") applyBounded(playerStats.dp);
-    else if (key == "ds") applyBounded(playerStats.ds);
-    else if (key == "string") applyBounded(playerStats.string);
-    else if (key == "graph") applyBounded(playerStats.graph);
-    else if (key == "combinatorics") applyBounded(playerStats.combinatorics);
-    else if (key == "thinking") applyBounded(playerStats.thinking);
-    else if (key == "coding") applyBounded(playerStats.coding);
-    else if (key == "carefulness") applyBounded(playerStats.carefulness);
-    else if (key == "quickness") applyBounded(playerStats.quickness);
-    else if (key == "mental") applyBounded(playerStats.mental);
-    else if (key == "experience") applyBounded(playerStats.experience);
-    else if (key == "culture") applyBounded(playerStats.culture);
-    else if (key == "luck") applyBounded(playerStats.luck);
+    }
 }
 
 inline void applySelectedOptionEffects(const EventOption& option) {

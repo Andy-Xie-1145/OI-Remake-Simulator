@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <functional>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -42,7 +43,7 @@ namespace
         GameOver
     };
 
-    constexpr const char *kGameVersion = "v0.1.4-beta-2";
+    constexpr const char *kGameVersion = "v0.1.6-beta";
     constexpr const char *kIntroStoryText =
         "我重生了？\n"
         "参加完 2077 年的省队选拔后，高二的你意识到自己无缘今年省队了。也许从此就和 OI 无缘了。\n\n"
@@ -53,6 +54,25 @@ namespace
         "你意识到，这一次，你还有机会。\n\n"
         "你决定，这一次，让 OI 生涯不留遗憾。\n\n"
         "你充满了决心。";
+
+    constexpr float kPrimaryButtonWidth = 180.0f;
+    constexpr float kPrimaryButtonHeight = 44.0f;
+    constexpr float kSecondaryButtonWidth = 160.0f;
+    constexpr float kSecondaryButtonHeight = 40.0f;
+
+    void RenderPageHeader(const char *title, const char *description = nullptr)
+    {
+        ImGui::Spacing();
+        ImGui::TextUnformatted(title);
+        ImGui::Separator();
+        if (description != nullptr && description[0] != '\0')
+        {
+            ImGui::TextWrapped("%s", description);
+            ImGui::Spacing();
+        }
+    }
+
+
 
     struct ContestProblemResult
     {
@@ -123,13 +143,7 @@ namespace
         debugmode = false;
         problems.clear();
         subProblems.clear();
-        thinkProgress.clear();
-        codeProgress.clear();
-        isCodeComplete.clear();
-        errorRates.clear();
-        modificationCount.clear();
-        hasAttemptedCheck.clear();
-        requiresCodeModification.clear();
+        contestStates.clear();
         lastActions.clear();
         currentPhase = 1;
         totalTrainingEvents = 5;
@@ -178,31 +192,32 @@ namespace
         return buildSubProblemRequirementText(problemIdx, subProblemIdx);
     }
 
-    std::string FormatEffectValue(const EventOption &option, const std::string &key, int value)
-    {
-        if (key == "mood" && option.text == "缓和心态")
-        {
-            return "心态设为" + std::to_string(value);
-        }
-
-        const std::string statName = Utils::getStatName(key);
-        if (value > 0)
-        {
-            return statName + "+" + std::to_string(value);
-        }
-        if (value < 0)
-        {
-            return statName + std::to_string(value);
-        }
-        return statName + "+0";
-    }
-
     std::string BuildOptionEffectText(const EventOption &option)
     {
         std::vector<std::string> effects;
         for (const auto &[key, value] : option.effects)
         {
-            effects.push_back(FormatEffectValue(option, key, value));
+            // 内联 FormatEffectValue 逻辑
+            if (key == "mood" && option.text == "缓和心态")
+            {
+                effects.push_back("心态设为" + std::to_string(value));
+            }
+            else
+            {
+                const std::string statName = Utils::getStatName(key);
+                if (value > 0)
+                {
+                    effects.push_back(statName + "+" + std::to_string(value));
+                }
+                else if (value < 0)
+                {
+                    effects.push_back(statName + std::to_string(value));
+                }
+                else
+                {
+                    effects.push_back(statName + "+0");
+                }
+            }
         }
 
         if (!option.nextEvent.empty() || !option.randomChoices.empty() ||
@@ -261,6 +276,7 @@ namespace
         void AdvanceStory();
         void ShowNotice(NoticeView notice);
         void DismissNotice();
+        void CheckAndShowContestNotice(char preferredAction);
         void OpenHelp();
 
         void RenderTopBar();
@@ -336,6 +352,7 @@ namespace
     void GuiApp::BeginSetup()
     {
         gameDifficulty = selectedDifficulty_;
+        ResetSharedState();
         initGame();
         logEvent("选择了" + DifficultyLabel(gameDifficulty) + "难度", "event");
         talents_.fill(0);
@@ -561,8 +578,9 @@ namespace
             for (size_t j = 0; j < subProblems[i].size(); ++j)
             {
                 const auto &sp = subProblems[i][j];
-                const bool codeCompleted = codeProgress[i][j] >= calculateCodeTime(sp);
-                const bool checkCompleted = isCodeComplete[i][j];
+                const auto& cs = contestStates[i][j];
+                const bool codeCompleted = cs.codeProgress >= calculateCodeTime(sp);
+                const bool checkCompleted = cs.isCodeComplete;
 
                 if (codeCompleted)
                 {
@@ -575,7 +593,7 @@ namespace
                 }
                 else if (codeCompleted && !isIOIContest)
                 {
-                    const double successRate = 1.0 - errorRates[i][j];
+                    const double successRate = 1.0 - cs.errorRate;
                     for (int k = static_cast<int>(j); k >= 0; --k)
                     {
                         if (Utils::randomBool(successRate))
@@ -595,41 +613,52 @@ namespace
         result.expectedTotal = totalExpectedScore;
         result.actualTotal = totalActualScore;
 
-        if (currentContestName == "省选Day2")
+        // 多日比赛聚合规则表
+        struct AggregateRule
         {
-            playerStats.tempScore = totalActualScore + playerStats.prevScore + playerStats.noipScore;
-            result.aggregateLabel = "省选总分";
+            const char* contestDay;      // 比赛名称（触发聚合）
+            const char* label;           // 聚合标签
+            std::function<int(int)> compute;  // 计算聚合总分
+            std::function<void(int)> postApply;  // 聚合后的额外赋值（如 cttScore）
+        };
+
+        static const AggregateRule aggregateRules[] = {
+            {
+                "省选Day2", "省选总分",
+                [](int score) { return score + playerStats.prevScore + playerStats.noipScore; },
+                [](int) {}
+            },
+            {
+                "NOI Day2", "NOI总分",
+                [](int score) { return score + playerStats.prevScore + (playerStats.isProvincialTeamA ? 5 : 0); },
+                [](int) {}
+            },
+            {
+                "IOI Day2", "IOI总分",
+                [](int score) { return score + playerStats.prevScore; },
+                [](int) {}
+            },
+            {
+                "CTT Day4", "CTT总分",
+                [](int score) { return score + playerStats.prevScore1 + playerStats.prevScore2 + playerStats.prevScore3; },
+                [](int total) { playerStats.cttScore = total; }
+            },
+            {
+                "CTS Day2", "CTS总分",
+                [](int score) { return score + playerStats.prevScore + playerStats.cttScore; },
+                [](int) {}
+            },
+        };
+
+        for (const auto& rule : aggregateRules)
+        {
+            if (currentContestName != rule.contestDay) continue;
+            playerStats.tempScore = rule.compute(totalActualScore);
+            rule.postApply(playerStats.tempScore);
+            result.aggregateLabel = rule.label;
             result.aggregateValue = playerStats.tempScore;
             result.hasAggregate = true;
-        }
-        else if (currentContestName == "NOI Day2")
-        {
-            playerStats.tempScore = totalActualScore + playerStats.prevScore + (playerStats.isProvincialTeamA ? 5 : 0);
-            result.aggregateLabel = "NOI总分";
-            result.aggregateValue = playerStats.tempScore;
-            result.hasAggregate = true;
-        }
-        else if (currentContestName == "IOI Day2")
-        {
-            playerStats.tempScore = totalActualScore + playerStats.prevScore;
-            result.aggregateLabel = "IOI总分";
-            result.aggregateValue = playerStats.tempScore;
-            result.hasAggregate = true;
-        }
-        else if (currentContestName == "CTT Day4")
-        {
-            playerStats.tempScore = totalActualScore + playerStats.prevScore1 + playerStats.prevScore2 + playerStats.prevScore3;
-            playerStats.cttScore = playerStats.tempScore;
-            result.aggregateLabel = "CTT总分";
-            result.aggregateValue = playerStats.tempScore;
-            result.hasAggregate = true;
-        }
-        else if (currentContestName == "CTS Day2")
-        {
-            playerStats.tempScore = totalActualScore + playerStats.prevScore + playerStats.cttScore;
-            result.aggregateLabel = "CTS总分";
-            result.aggregateValue = playerStats.tempScore;
-            result.hasAggregate = true;
+            break;
         }
 
         result.determinationReward = totalActualScore * 5;
@@ -656,19 +685,22 @@ namespace
 
         if (isFinalDayContest)
         {
-            if (currentContestName == "省选Day2")
-                result.award = calculateAward(totalActualScore, "省选");
-            else if (currentContestName == "NOI Day2")
-                result.award = calculateAward(totalActualScore, "NOI");
-            else if (currentContestName == "IOI Day2")
-                result.award = calculateAward(totalActualScore, "IOI");
-            else if (currentContestName == "CTT Day4")
-                result.award = calculateAward(totalActualScore, "CTT");
-            else if (currentContestName == "CTS Day2")
-                result.award = calculateAward(totalActualScore, "CTS");
-            else
-                result.award = calculateAward(totalActualScore, currentContestName);
+            // contestDay → awardType 映射表
+            static const std::pair<const char*, const char*> awardTypeMap[] = {
+                {"省选Day2", "省选"},
+                {"NOI Day2", "NOI"},
+                {"IOI Day2", "IOI"},
+                {"CTT Day4", "CTT"},
+                {"CTS Day2", "CTS"},
+            };
 
+            std::string awardType = currentContestName;  // 默认直接用比赛名
+            for (const auto& [day, type] : awardTypeMap)
+            {
+                if (currentContestName == day) { awardType = type; break; }
+            }
+
+            result.award = calculateAward(totalActualScore, awardType);
             result.hasAward = !result.award.empty();
 
             if (currentContestName == "CSP-S")
@@ -678,6 +710,7 @@ namespace
         }
         else
         {
+            // 非最终日：保存分数到对应 prevScore 字段
             playerStats.prevScore = totalActualScore;
             if (currentContestName == "CTT Day1")
                 playerStats.prevScore1 = totalActualScore;
@@ -725,6 +758,32 @@ namespace
         }
     }
 
+    // 检查并展示待处理的比赛通知（突发事件等）
+    void GuiApp::CheckAndShowContestNotice(char preferredAction)
+    {
+        if (!hasPendingContestNotice())
+        {
+            return;
+        }
+
+        const PendingContestNotice eventNotice = consumePendingContestNotice();
+        NoticeView notice;
+        notice.title = eventNotice.title;
+        notice.body = eventNotice.description;
+        notice.detail = eventNotice.effectText;
+
+        if (preferredAction == 'f')
+        {
+            notice.action = isFullScore() ? NoticeView::Action::FinalizeContest : NoticeView::Action::ReturnContest;
+        }
+        else
+        {
+            notice.action = NoticeView::Action::ReturnContest;
+        }
+
+        ShowNotice(std::move(notice));
+    }
+
     void GuiApp::HandleContestAction(int subProblemIdx, char action)
     {
         const int problemIdx = currentProblem - 1;
@@ -744,13 +803,7 @@ namespace
 
         if (hasPendingContestNotice())
         {
-            const PendingContestNotice eventNotice = consumePendingContestNotice();
-            NoticeView notice;
-            notice.title = eventNotice.title;
-            notice.body = eventNotice.description;
-            notice.detail = eventNotice.effectText;
-            notice.action = isFullScore() ? NoticeView::Action::FinalizeContest : NoticeView::Action::ReturnContest;
-            ShowNotice(std::move(notice));
+            CheckAndShowContestNotice('f');
             return;
         }
 
@@ -768,17 +821,7 @@ namespace
             return;
 
         modifyCodeSubProblem(problemIdx, subProblemIdx);
-
-        if (hasPendingContestNotice())
-        {
-            const PendingContestNotice eventNotice = consumePendingContestNotice();
-            NoticeView notice;
-            notice.title = eventNotice.title;
-            notice.body = eventNotice.description;
-            notice.detail = eventNotice.effectText;
-            notice.action = NoticeView::Action::ReturnContest;
-            ShowNotice(std::move(notice));
-        }
+        CheckAndShowContestNotice('r');
     }
 
     void GuiApp::SetGameOver(std::string reason)
@@ -786,336 +829,207 @@ namespace
         gameOver_.reason = std::move(reason);
         screen_ = GuiScreen::GameOver;
     }
+    // 故事节拍定义：线性扫描替代 switch-case
+    struct StoryBeat
+    {
+        int from;               // storyCursor 起始值
+        int next;               // 执行后 storyCursor 跳转目标
+        enum ActionType { Training, Contest, Notice, GameOver, FlagAndContest, FlagAndContinue } action;
+        int param1 = 0;         // Training: phase, Contest: contestId
+        int param2 = 0;         // Training: numEvents
+        std::string param3;     // Training: startLog, GameOver: reason
+        std::function<bool()> condition;       // 条件检查（true = 满足）
+        int skipTo = -1;        // 条件不满足时跳转目标（-1 = continue 到下一 beat）
+        std::string skipLog;    // 条件不满足时的日志
+        std::function<bool()> skipCondition;  // 条件不满足时的二次条件（true → skipTo, false → skipGameOver）
+        std::string skipGameOver;  // 条件不满足时的 GameOver 原因（非空则 GameOver）
+        std::function<void()> preAction;       // 执行前的副作用（如重置 flag）
+    };
+
     void GuiApp::AdvanceStory()
     {
+        static const StoryBeat beats[] = {
+            // ---- 高一上 ----
+            {0, 1, StoryBeat::Training, 1, 5, "第一次训练开始..."},
+            {1, 2, StoryBeat::Contest, 1},
+            {2, 3, StoryBeat::Training, 3, 4, "第二次训练开始..."},
+            {3, 4, StoryBeat::Contest, 2, 0, "",
+                []() { return playerStats.cspScore > 0; },
+                -1, "由于CSP-S成绩为零分，无法参加NOIP比赛",
+                nullptr, "", []() { playerStats.noipScore = 0; }},
+            {4, 5, StoryBeat::Training, 5, 4, "第三次训练开始..."},
+            {5, 6, StoryBeat::Contest, 3, 0, "",
+                []() { return playerStats.cspScore >= 180 * difficultyMultiplier(); },
+                6, "由于CSP-S成绩未达到二等奖及以上，无法参加WC比赛"},
+            {6, 7, StoryBeat::Training, 7, 4, "第四次训练开始..."},
+            {7, 8, StoryBeat::Contest, 4},
+            {8, 9, StoryBeat::Training, 9, 2, "第五次训练开始..."},
+            {9, 10, StoryBeat::Contest, 5},
+            {10, 11, StoryBeat::Training, 11, 4, "第六次训练开始..."},
+            {11, 12, StoryBeat::Contest, 6, 0, "",
+                []() { return playerStats.noipScore >= 180 * difficultyMultiplier(); },
+                12, "由于NOIP成绩未达到二等奖及以上，无法参加APIO比赛"},
+            // ---- 高一下：省选 → NOI ----
+            {12, 13, StoryBeat::Training, 13, 4, "第七次训练开始...",
+                []() { return playerStats.isProvincialTeam; },
+                16, "由于未进入省队，第一年的NOI阶段跳过"},
+            {13, 14, StoryBeat::Contest, 7},
+            {14, 15, StoryBeat::Training, 15, 2, "第八次训练开始..."},
+            {15, 16, StoryBeat::Contest, 8},
+            // ---- 升入高二 ----
+            {16, 17, StoryBeat::Notice, 17, 8, "第九次训练开始..."},
+            // ---- 高二上 ----
+            {17, 18, StoryBeat::Contest, 1},
+            {18, 19, StoryBeat::Training, 19, 5, "第十次训练开始..."},
+            {19, 20, StoryBeat::Contest, 2, 0, "",
+                []() { return playerStats.cspScore > 0 || playerStats.isTrainingTeam; },
+                -1, "由于CSP-S成绩为零分，无法参加NOIP比赛",
+                nullptr, "", []() { playerStats.noipScore = 0; }},
+            {20, 21, StoryBeat::Training, 21, 1, "第十一次训练开始...",
+                []() { return playerStats.isTrainingTeam; }, 29},
+            // ---- 集训队路线 ----
+            {21, 22, StoryBeat::Contest, 9},
+            {22, 23, StoryBeat::Contest, 10},
+            {23, 24, StoryBeat::Contest, 11},
+            {24, 25, StoryBeat::Contest, 12},
+            {25, 26, StoryBeat::Training, 26, 4, "第十二次训练开始...",
+                []() { return playerStats.isCandidateTeam; }, 29},
+            {26, 27, StoryBeat::Contest, 13},
+            {27, 30, StoryBeat::Contest, 14},
+            // ---- 非集训队路线（从 case 20 skipTo 29） ----
+            {29, 30, StoryBeat::Contest, 3, 0, "",
+                []() { return playerStats.cspScore >= 180 * difficultyMultiplier(); },
+                30, "由于CSP-S成绩未达到二等奖及以上，无法参加WC比赛"},
+            {30, 31, StoryBeat::Training, 31, 5, "第十三次训练开始..."},
+            {31, 32, StoryBeat::FlagAndContest, 4, 0, "",
+                nullptr, -1, "", nullptr, "", []() { playerStats.isProvincialTeam = false; playerStats.isProvincialTeamA = false; }},
+            {32, 33, StoryBeat::Training, 33, 2, "第十五次训练开始..."},
+            {33, 34, StoryBeat::Contest, 5},
+            {34, 35, StoryBeat::FlagAndContinue, 0, 0, "",
+                []() { return playerStats.isProvincialTeam || playerStats.isNationalTeam; },
+                -1, "", nullptr, "在高二省选中未能进入省队", nullptr},
+            {35, 36, StoryBeat::Training, 35, 4, "第十六次训练开始..."},
+            {36, 37, StoryBeat::Contest, 6},
+            {37, 38, StoryBeat::Training, 38, 5, "第十七次训练开始..."},
+            {38, 39, StoryBeat::FlagAndContest, 7, 0, "",
+                nullptr, -1, "", nullptr, "", []() { playerStats.isTrainingTeam = false; }},
+            {39, 40, StoryBeat::Training, 40, 2, "第十八次训练开始..."},
+            {40, 41, StoryBeat::Contest, 8},
+            {41, 42, StoryBeat::Training, 42, 6, "第十九次训练开始...",
+                []() { return playerStats.isNationalTeam; }, 45, "", []() { return playerStats.isTrainingTeam; }, "完成NOI比赛"},
+            // ---- 集训队 → IOI 路线 ----
+            {42, 43, StoryBeat::Contest, 15},
+            {43, 44, StoryBeat::Contest, 16},
+            {44, 45, StoryBeat::FlagAndContinue, 0, 0, "",
+                []() { return !playerStats.isIOIgold && playerStats.isTrainingTeam; },
+                -1, "", nullptr, "完成IOI比赛", nullptr},
+            // ---- CTT → CTS 路线 ----
+            {45, 46, StoryBeat::Training, 45, 1, "第二十次训练开始..."},
+            {46, 47, StoryBeat::FlagAndContest, 9, 0, "",
+                nullptr, -1, "", nullptr, "", []() { playerStats.isCandidateTeam = false; }},
+            {47, 48, StoryBeat::Contest, 10},
+            {48, 49, StoryBeat::Contest, 11},
+            {49, 50, StoryBeat::Contest, 12},
+            {50, 51, StoryBeat::FlagAndContinue, 0, 0, "",
+                []() { return playerStats.isCandidateTeam; },
+                -1, "", nullptr, "未能进入候选队", nullptr},
+            {51, 52, StoryBeat::Training, 50, 4, "第二十一次训练开始..."},
+            {52, 53, StoryBeat::FlagAndContest, 13, 0, "",
+                nullptr, -1, "", nullptr, "", []() { playerStats.isNationalTeam = false; }},
+            {53, 54, StoryBeat::Training, 53, 6, "第二十二次训练开始..."},
+            {54, 55, StoryBeat::FlagAndContinue, 0, 0, "",
+                []() { return playerStats.isNationalTeam; },
+                -1, "", nullptr, "未能进入国家队", nullptr},
+            {55, 56, StoryBeat::Training, 53, 6, "第二十二次训练开始..."},
+            {56, 57, StoryBeat::Contest, 15},
+            {57, 58, StoryBeat::Contest, 16},
+            {58, 59, StoryBeat::GameOver, 0, 0, "完成IOI比赛"},
+        };
+
         while (true)
         {
-            switch (storyCursor_)
+            bool matched = false;
+            for (const auto& beat : beats)
             {
-            case 0:
-                storyCursor_ = 1;
-                BeginTrainingPhase(1, 5, "第一次训练开始...");
-                return;
-            case 1:
-                storyCursor_ = 2;
-                BeginContestStep(1);
-                return;
-            case 2:
-                storyCursor_ = 3;
-                BeginTrainingPhase(3, 4, "第二次训练开始...");
-                return;
-            case 3:
-                storyCursor_ = 4;
-                if (playerStats.cspScore <= 0)
+                if (storyCursor_ != beat.from) continue;
+                matched = true;
+
+                // 条件检查
+                if (beat.condition && !beat.condition())
                 {
-                    logEvent("由于CSP-S成绩为零分，无法参加NOIP比赛", "event");
-                    playerStats.noipScore = 0;
-                    continue;
+                    if (!beat.skipLog.empty())
+                    {
+                        logEvent(beat.skipLog, "event");
+                    }
+                    if (beat.preAction) beat.preAction();
+
+                    // 条件不满足时的处理
+                    if (!beat.skipGameOver.empty())
+                    {
+                        // 有二次条件：skipCondition true → skipTo, false → GameOver
+                        if (beat.skipCondition && beat.skipCondition())
+                        {
+                            storyCursor_ = beat.skipTo;
+                        }
+                        else
+                        {
+                            SetGameOver(beat.skipGameOver);
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        storyCursor_ = beat.skipTo;
+                    }
+                    break;  // continue 外层 while
                 }
-                BeginContestStep(2);
-                return;
-            case 4:
-                storyCursor_ = 5;
-                BeginTrainingPhase(5, 4, "第三次训练开始...");
-                return;
-            case 5:
-                storyCursor_ = 6;
-                if (playerStats.cspScore >= 180 * difficultyMultiplier())
+
+                // 执行前副作用
+                if (beat.preAction) beat.preAction();
+
+                switch (beat.action)
                 {
-                    BeginContestStep(3);
+                case StoryBeat::Training:
+                    storyCursor_ = beat.next;
+                    BeginTrainingPhase(beat.param1, beat.param2, beat.param3);
                     return;
-                }
-                logEvent("由于CSP-S成绩未达到二等奖及以上，无法参加WC比赛", "event");
-                continue;
-            case 6:
-                storyCursor_ = 7;
-                BeginTrainingPhase(7, 4, "第四次训练开始...");
-                return;
-            case 7:
-                storyCursor_ = 8;
-                BeginContestStep(4);
-                return;
-            case 8:
-                storyCursor_ = 9;
-                BeginTrainingPhase(9, 2, "第五次训练开始...");
-                return;
-            case 9:
-                storyCursor_ = 10;
-                BeginContestStep(5);
-                return;
-            case 10:
-                storyCursor_ = 11;
-                BeginTrainingPhase(11, 4, "第六次训练开始...");
-                return;
-            case 11:
-                storyCursor_ = 12;
-                if (playerStats.noipScore >= 180 * difficultyMultiplier())
-                {
-                    BeginContestStep(6);
+                case StoryBeat::Contest:
+                case StoryBeat::FlagAndContest:
+                    storyCursor_ = beat.next;
+                    BeginContestStep(beat.param1);
                     return;
-                }
-                logEvent("由于NOIP成绩未达到二等奖及以上，无法参加APIO比赛", "event");
-                continue;
-            case 12:
-                if (!playerStats.isProvincialTeam)
+                case StoryBeat::Notice:
                 {
-                    logEvent("由于未进入省队，第一年的NOI阶段跳过", "event");
-                    storyCursor_ = 16;
-                    continue;
-                }
-                storyCursor_ = 13;
-                BeginTrainingPhase(13, 4, "第七次训练开始...");
-                return;
-            case 13:
-                storyCursor_ = 14;
-                BeginContestStep(7);
-                return;
-            case 14:
-                storyCursor_ = 15;
-                BeginTrainingPhase(15, 2, "第八次训练开始...");
-                return;
-            case 15:
-                storyCursor_ = 16;
-                BeginContestStep(8);
-                return;
-            case 16:
-                addExperience(1, "升入高二");
-                storyCursor_ = 17;
-                {
+                    addExperience(1, "升入高二");
+                    storyCursor_ = beat.next;
                     NoticeView notice;
                     notice.title = "升入高二";
                     notice.body = "经过 1 年的学习与比赛历练，你对 OI 的理解更深了一层。";
                     notice.detail = "经验+1";
                     notice.action = NoticeView::Action::BeginTrainingPhase;
-                    notice.phase = 17;
-                    notice.numEvents = 8;
-                    notice.startLog = "第九次训练开始...";
+                    notice.phase = beat.param1;
+                    notice.numEvents = beat.param2;
+                    notice.startLog = beat.param3;
                     ShowNotice(std::move(notice));
-                }
-                return;
-            case 17:
-                storyCursor_ = 18;
-                BeginContestStep(1);
-                return;
-            case 18:
-                storyCursor_ = 19;
-                BeginTrainingPhase(19, 5, "第十次训练开始...");
-                return;
-            case 19:
-                storyCursor_ = 20;
-                if (playerStats.cspScore <= 0 && !playerStats.isTrainingTeam)
-                {
-                    logEvent("由于CSP-S成绩为零分，无法参加NOIP比赛", "event");
-                    playerStats.noipScore = 0;
-                    continue;
-                }
-                BeginContestStep(2);
-                return;
-            case 20:
-                if (playerStats.isTrainingTeam)
-                {
-                    storyCursor_ = 21;
-                    BeginTrainingPhase(21, 1, "第十一次训练开始...");
                     return;
                 }
-                storyCursor_ = 29;
-                BeginTrainingPhase(29, 4, "第十一次训练开始...");
-                return;
-            case 21:
-                storyCursor_ = 22;
-                BeginContestStep(9);
-                return;
-            case 22:
-                storyCursor_ = 23;
-                BeginContestStep(10);
-                return;
-            case 23:
-                storyCursor_ = 24;
-                BeginContestStep(11);
-                return;
-            case 24:
-                storyCursor_ = 25;
-                BeginContestStep(12);
-                return;
-            case 25:
-                if (playerStats.isCandidateTeam)
-                {
-                    storyCursor_ = 26;
-                    BeginTrainingPhase(26, 4, "第十二次训练开始...");
+                case StoryBeat::GameOver:
+                    SetGameOver(beat.param3);
                     return;
+                case StoryBeat::FlagAndContinue:
+                    storyCursor_ = beat.next;
+                    break;  // continue 外层 while
                 }
-                storyCursor_ = 29;
-                BeginTrainingPhase(29, 4, "第十二次训练开始...");
-                return;
-            case 26:
-                storyCursor_ = 27;
-                BeginContestStep(13);
-                return;
-            case 27:
-                storyCursor_ = 30;
-                BeginContestStep(14);
-                return;
-            case 29:
-                storyCursor_ = 30;
-                if (playerStats.cspScore >= 180 * difficultyMultiplier())
-                {
-                    BeginContestStep(3);
-                    return;
-                }
-                logEvent("由于CSP-S成绩未达到二等奖及以上，无法参加WC比赛", "event");
-                continue;
-            case 30:
-                storyCursor_ = 31;
-                BeginTrainingPhase(31, 5, "第十三次训练开始...");
-                return;
-            case 31:
-                playerStats.isProvincialTeam = false;
-                playerStats.isProvincialTeamA = false;
-                storyCursor_ = 32;
-                BeginContestStep(4);
-                return;
-            case 32:
-                storyCursor_ = 33;
-                BeginTrainingPhase(33, 2, "第十五次训练开始...");
-                return;
-            case 33:
-                storyCursor_ = 34;
-                BeginContestStep(5);
-                return;
-            case 34:
-                if (!playerStats.isProvincialTeam && !playerStats.isNationalTeam)
-                {
-                    SetGameOver("在高二省选中未能进入省队");
-                    return;
-                }
-                storyCursor_ = 35;
-                continue;
-            case 35:
-                storyCursor_ = 36;
-                BeginTrainingPhase(35, 4, "第十六次训练开始...");
-                return;
-            case 36:
-                storyCursor_ = 37;
-                BeginContestStep(6);
-                return;
-            case 37:
-                storyCursor_ = 38;
-                BeginTrainingPhase(38, 5, "第十七次训练开始...");
-                return;
-            case 38:
-                playerStats.isTrainingTeam = false;
-                storyCursor_ = 39;
-                BeginContestStep(7);
-                return;
-            case 39:
-                storyCursor_ = 40;
-                BeginTrainingPhase(40, 2, "第十八次训练开始...");
-                return;
-            case 40:
-                storyCursor_ = 41;
-                BeginContestStep(8);
-                return;
-            case 41:
-                if (playerStats.isNationalTeam)
-                {
-                    storyCursor_ = 42;
-                    BeginTrainingPhase(42, 6, "第十九次训练开始...");
-                    return;
-                }
-                if (!playerStats.isTrainingTeam)
-                {
-                    SetGameOver("完成NOI比赛");
-                    return;
-                }
-                storyCursor_ = 45;
-                continue;
-            case 42:
-                storyCursor_ = 43;
-                BeginContestStep(15);
-                return;
-            case 43:
-                storyCursor_ = 44;
-                BeginContestStep(16);
-                return;
-            case 44:
-                if (playerStats.isIOIgold || !playerStats.isTrainingTeam)
-                {
-                    SetGameOver("完成IOI比赛");
-                    return;
-                }
-                storyCursor_ = 45;
-                continue;
-            case 45:
-                storyCursor_ = 46;
-                BeginTrainingPhase(45, 1, "第二十次训练开始...");
-                return;
-            case 46:
-                playerStats.isCandidateTeam = false;
-                storyCursor_ = 47;
-                BeginContestStep(9);
-                return;
-            case 47:
-                storyCursor_ = 48;
-                BeginContestStep(10);
-                return;
-            case 48:
-                storyCursor_ = 49;
-                BeginContestStep(11);
-                return;
-            case 49:
-                storyCursor_ = 50;
-                BeginContestStep(12);
-                return;
-            case 50:
-                if (!playerStats.isCandidateTeam)
-                {
-                    SetGameOver("未能进入候选队");
-                    return;
-                }
-                storyCursor_ = 51;
-                continue;
-            case 51:
-                storyCursor_ = 52;
-                BeginTrainingPhase(50, 4, "第二十一次训练开始...");
-                return;
-            case 52:
-                playerStats.isNationalTeam = false;
-                storyCursor_ = 53;
-                BeginContestStep(13);
-                return;
-            case 53:
-                storyCursor_ = 54;
-                BeginContestStep(14);
-                return;
-            case 54:
-                if (!playerStats.isNationalTeam)
-                {
-                    SetGameOver("未能进入国家队");
-                    return;
-                }
-                storyCursor_ = 55;
-                continue;
-            case 55:
-                storyCursor_ = 56;
-                BeginTrainingPhase(53, 6, "第二十二次训练开始...");
-                return;
-            case 56:
-                storyCursor_ = 57;
-                BeginContestStep(15);
-                return;
-            case 57:
-                storyCursor_ = 58;
-                BeginContestStep(16);
-                return;
-            case 58:
-                SetGameOver("完成IOI比赛");
-                return;
-            default:
+            }
+
+            if (!matched)
+            {
                 SetGameOver("游戏流程已结束");
                 return;
             }
         }
     }
+
     void GuiApp::Render()
     {
         ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
@@ -1196,37 +1110,20 @@ namespace
             ImGui::TextColored(ImVec4(0.95f, 0.78f, 0.25f, 1.0f), "%s", fontWarning_.c_str());
         }
 
-        const bool showHelpButton = screen_ != GuiScreen::Help;
-        const bool showHomeButton = screen_ != GuiScreen::Home;
-        const int buttonCount = static_cast<int>(showHelpButton) + static_cast<int>(showHomeButton);
-        if (buttonCount > 0)
+        const bool showHelp = screen_ != GuiScreen::Help;
+        const bool showHome = screen_ != GuiScreen::Home;
+        if (showHelp || showHome)
         {
-            const float buttonWidth = 96.0f;
-            const float spacing = 8.0f;
-            const float totalWidth = buttonWidth * buttonCount + spacing * (buttonCount - 1);
+            const float bw = 96.0f;
+            const int n = static_cast<int>(showHelp) + static_cast<int>(showHome);
             ImGui::SameLine();
-            ImGui::SetCursorPosX(ImGui::GetWindowWidth() - totalWidth - 16.0f);
-
-            if (showHelpButton)
-            {
-                if (ImGui::Button("帮助", ImVec2(buttonWidth, 0.0f)))
-                {
-                    OpenHelp();
-                }
-            }
-
-            if (showHelpButton && showHomeButton)
-            {
+            ImGui::SetCursorPosX(ImGui::GetWindowWidth() - bw * n - 8.0f * (n - 1) - 16.0f);
+            if (showHelp && ImGui::Button("帮助", ImVec2(bw, 0.0f)))
+                OpenHelp();
+            if (showHelp && showHome)
                 ImGui::SameLine();
-            }
-
-            if (showHomeButton)
-            {
-                if (ImGui::Button("返回首页", ImVec2(buttonWidth, 0.0f)))
-                {
-                    ResetToHome();
-                }
-            }
+            if (showHome && ImGui::Button("返回首页", ImVec2(bw, 0.0f)))
+                ResetToHome();
         }
 
         ImGui::Separator();
@@ -1234,13 +1131,10 @@ namespace
 
     void GuiApp::RenderHome()
     {
-        ImGui::Spacing();
-        ImGui::Text("OI重开模拟器[%s]", kGameVersion);
-        ImGui::Separator();
-        ImGui::TextWrapped("一次重新来过的 OI 生涯，从这里开始。");
-        ImGui::Spacing();
+        const std::string title = "OI重开模拟器[" + std::string(kGameVersion) + "]";
+        RenderPageHeader(title.c_str(), "一次重新来过的 OI 生涯，从这里开始。");
 
-        if (ImGui::Button("开始游戏", ImVec2(180.0f, 44.0f)))
+        if (ImGui::Button("开始游戏", ImVec2(kPrimaryButtonWidth, kPrimaryButtonHeight)))
         {
             screen_ = GuiScreen::Difficulty;
         }
@@ -1248,11 +1142,7 @@ namespace
 
     void GuiApp::RenderDifficulty()
     {
-        ImGui::Spacing();
-        ImGui::TextUnformatted("选择难度");
-        ImGui::Separator();
-        ImGui::TextWrapped("选择难度后进入开局剧情。");
-        ImGui::Spacing();
+        RenderPageHeader("选择难度", "选择难度后进入开局剧情。");
 
         static const std::array<std::pair<const char *, const char *>, 4> difficultyOrder = {{{"easy", "简单：天赋点 30，初始决心 3000，分数线降低 20%"},
                                                                                               {"normal", "普通：天赋点 20，初始决心 1500，分数线降低 10%"},
@@ -1285,7 +1175,7 @@ namespace
         ImGui::Spacing();
         ImGui::Spacing();
 
-        if (ImGui::Button("进入剧情", ImVec2(180.0f, 44.0f)))
+        if (ImGui::Button("进入剧情", ImVec2(kPrimaryButtonWidth, kPrimaryButtonHeight)))
         {
             BeginSetup();
         }
@@ -1293,15 +1183,13 @@ namespace
 
     void GuiApp::RenderIntroStory()
     {
-        ImGui::Spacing();
-        ImGui::TextUnformatted("重开");
-        ImGui::Separator();
+        RenderPageHeader("重开");
         ImGui::BeginChild("intro_story_card", ImVec2(0.0f, 420.0f), true);
         ImGui::TextWrapped("%s", kIntroStoryText);
         ImGui::EndChild();
         ImGui::Spacing();
 
-        if (ImGui::Button("开始训练", ImVec2(180.0f, 44.0f)))
+        if (ImGui::Button("开始训练", ImVec2(kPrimaryButtonWidth, kPrimaryButtonHeight)))
         {
             screen_ = GuiScreen::Talent;
         }
@@ -1309,64 +1197,52 @@ namespace
 
     void GuiApp::RenderHelp()
     {
-        ImGui::TextUnformatted("帮助");
-        ImGui::Separator();
-        ImGui::TextWrapped("这里汇总了开局、训练、比赛和关键机制的说明。右侧边栏也会根据当前界面给出速查提示。");
+        RenderPageHeader("帮助", "这里汇总了开局、训练、比赛和关键机制的说明。右侧边栏也会根据当前界面给出速查提示。");
+
+        static const struct { const char* title; const char* items[11]; int count; } helpSections[] = {
+            {"流程概览", {"首页 -> 难度选择 -> 剧情 -> 天赋分配 -> 训练/比赛推进。",
+                           "训练阶段主要获取属性、决心和特殊成长。",
+                           "比赛阶段通过思考、写代码、对拍或提交拿分。"}, 3},
+            {"训练说明", {"选项下方的\"效果\"会显示确定收益；出现\"?\"表示还有随机或隐藏后果。",
+                           "决心主要用于商店和部分事件，心态会影响比赛表现。",
+                           "经验用于对抗模糊，经验积累达到 6 会转化为 1 点经验。"}, 3},
+            {"比赛说明", {"标准流程通常是：思考 -> 写代码 -> 对拍/提交。",
+                           "思维影响思考成功率，代码影响写代码成功率，细心影响对拍/提交稳定性。",
+                           "IOI 赛制在时间为 0 时仍可继续提交；其他赛制时间为 0 后只能结束比赛。",
+                           "非 IOI 比赛对拍失败后，必须先修改代码，才能再次对拍。",
+                           "修改代码每次消耗 1 时间点，并按写代码成功率判定是否推进返工进度。",
+                           "需要累计完成 分支+1 次成功修改，才会重新生成一版代码并恢复对拍资格。"}, 6},
+            {"属性速览", {"动态规划 / 数据结构 / 字符串 / 图论 / 组合计数：对应知识方向的个人能力。能力越高，处理相关题型时思考耗时越少。",
+                           "思维：影响思考成功率。",
+                           "代码：影响写代码成功率。",
+                           "细心：降低对拍或提交翻车概率。",
+                           "迅捷：降低写代码耗时。",
+                           "心理素质：降低心态崩盘风险。",
+                           "运气：降低负面随机事件和部分失败概率。",
+                           "经验：抵消模糊等级，模糊被完全抵消后会恢复完整信息。"}, 8},
+            {"题目属性", {"动态规划 / 数据结构 / 字符串 / 图论 / 组合计数：这部分分主要考察的知识方向及要求强度。要求越高，而你的对应能力越不足，思考这部分分时花费的时间就越多。",
+                           "思维：这部分分对理解、转化和发现关键做法的要求。数值越高，思考成功率越低。",
+                           "代码：这部分分的实现工作量。数值越高，写代码所需的进度越多。",
+                           "细节：这部分分在实现上的繁琐程度和出错空间。数值越高，写代码成功率越低。",
+                           "陷阱：这部分分暗坑、卡点和隐藏错误的强度。数值越高，对拍或提交时翻车概率越高。",
+                           "模糊：题目描述中对难度和知识点信息的隐藏程度。等级越高，你能直接看到的要求和特性越少；如果你有足够的经验，这些模糊描述就骗不了你。",
+                           "分支：这部分分可能解法之间区别的复杂程度。数值越高，对拍失败后需要完成的修改次数越多。",
+                           "激励：取得进展时带来的正反馈强度。数值越高，写完代码或对拍成功后恢复的心态越多。",
+                           "红温：失败后的心态冲击强度。数值越高，思考失败或写代码失败时额外损失的心态越多。",
+                           "Adhoc：这部分分对临场观察、构造、找性质等非模板化能力的要求。数值越高，思考耗时越长。",
+                           "非独立：这部分分与前面的相关部分分存在联动。成功推进它时，可能会顺带推进前面同类的非独立部分分。"}, 11},
+        };
+
+        for (const auto& section : helpSections)
+        {
+            if (ImGui::CollapsingHeader(section.title, ImGuiTreeNodeFlags_DefaultOpen))
+            {
+                for (int j = 0; j < section.count; ++j)
+                    ImGui::BulletText("%s", section.items[j]);
+            }
+        }
         ImGui::Spacing();
-
-        if (ImGui::CollapsingHeader("流程概览", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            ImGui::BulletText("首页 -> 难度选择 -> 剧情 -> 天赋分配 -> 训练/比赛推进。");
-            ImGui::BulletText("训练阶段主要获取属性、决心和特殊成长。");
-            ImGui::BulletText("比赛阶段通过思考、写代码、对拍或提交拿分。");
-        }
-
-        if (ImGui::CollapsingHeader("训练说明", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            ImGui::BulletText("选项下方的“效果”会显示确定收益；出现“?”表示还有随机或隐藏后果。");
-            ImGui::BulletText("决心主要用于商店和部分事件，心态会影响比赛表现。");
-            ImGui::BulletText("经验用于对抗模糊，经验积累达到 6 会转化为 1 点经验。");
-        }
-
-        if (ImGui::CollapsingHeader("比赛说明", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            ImGui::BulletText("标准流程通常是：思考 -> 写代码 -> 对拍/提交。");
-            ImGui::BulletText("思维影响思考成功率，代码影响写代码成功率，细心影响对拍/提交稳定性。");
-            ImGui::BulletText("IOI 赛制在时间为 0 时仍可继续提交；其他赛制时间为 0 后只能结束比赛。");
-            ImGui::BulletText("非 IOI 比赛对拍失败后，必须先修改代码，才能再次对拍。");
-            ImGui::BulletText("修改代码每次消耗 1 时间点，并按写代码成功率判定是否推进返工进度。");
-            ImGui::BulletText("需要累计完成 分支+1 次成功修改，才会重新生成一版代码并恢复对拍资格。");
-        }
-
-        if (ImGui::CollapsingHeader("属性速览", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            ImGui::BulletText("动态规划 / 数据结构 / 字符串 / 图论 / 组合计数：对应知识方向的个人能力。能力越高，处理相关题型时思考耗时越少。");
-            ImGui::BulletText("思维：影响思考成功率。");
-            ImGui::BulletText("代码：影响写代码成功率。");
-            ImGui::BulletText("细心：降低对拍或提交翻车概率。");
-            ImGui::BulletText("迅捷：降低写代码耗时。");
-            ImGui::BulletText("心理素质：降低心态崩盘风险。");
-            ImGui::BulletText("运气：降低负面随机事件和部分失败概率。");
-            ImGui::BulletText("经验：抵消模糊等级，模糊被完全抵消后会恢复完整信息。");
-        }
-
-        if (ImGui::CollapsingHeader("题目属性", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            ImGui::BulletText("动态规划 / 数据结构 / 字符串 / 图论 / 组合计数：这部分分主要考察的知识方向及要求强度。要求越高，而你的对应能力越不足，思考这部分分时花费的时间就越多。");
-            ImGui::BulletText("思维：这部分分对理解、转化和发现关键做法的要求。数值越高，思考成功率越低。");
-            ImGui::BulletText("代码：这部分分的实现工作量。数值越高，写代码所需的进度越多。");
-            ImGui::BulletText("细节：这部分分在实现上的繁琐程度和出错空间。数值越高，写代码成功率越低。");
-            ImGui::BulletText("陷阱：这部分分暗坑、卡点和隐藏错误的强度。数值越高，对拍或提交时翻车概率越高。");
-            ImGui::BulletText("模糊：题目描述中对难度和知识点信息的隐藏程度。等级越高，你能直接看到的要求和特性越少；如果你有足够的经验，这些模糊描述就骗不了你。");
-            ImGui::BulletText("分支：这部分分可能解法之间区别的复杂程度。数值越高，对拍失败后需要完成的修改次数越多。");
-            ImGui::BulletText("激励：取得进展时带来的正反馈强度。数值越高，写完代码或对拍成功后恢复的心态越多。");
-            ImGui::BulletText("红温：失败后的心态冲击强度。数值越高，思考失败或写代码失败时额外损失的心态越多。");
-            ImGui::BulletText("Adhoc：这部分分对临场观察、构造、找性质等非模板化能力的要求。数值越高，思考耗时越长。");
-            ImGui::BulletText("非独立：这部分分与前面的相关部分分存在联动。成功推进它时，可能会顺带推进前面同类的非独立部分分。");
-        }
-
-        ImGui::Spacing();
-        if (ImGui::Button("返回上一页", ImVec2(160.0f, 40.0f)))
+        if (ImGui::Button("返回上一页", ImVec2(kSecondaryButtonWidth, kSecondaryButtonHeight)))
         {
             screen_ = helpReturnScreen_;
         }
@@ -1374,10 +1250,8 @@ namespace
 
     void GuiApp::RenderTalent()
     {
-        ImGui::Text("当前难度：%s", DifficultyLabel(selectedDifficulty_).c_str());
-        ImGui::Separator();
-        ImGui::TextWrapped("分配初始算法天赋点。这里保留原版规则：你可以不把点数花完。");
-        ImGui::Spacing();
+        const std::string title = "当前难度：" + DifficultyLabel(selectedDifficulty_);
+        RenderPageHeader(title.c_str(), "分配初始算法天赋点。这里保留原版规则：你可以不把点数花完。");
 
         static const std::array<const char *, 5> labels = {
             "动态规划", "数据结构", "字符串", "图论", "组合计数"};
@@ -1396,12 +1270,12 @@ namespace
         ImGui::Text("剩余：%d", RemainingTalent());
         ImGui::Spacing();
 
-        if (ImGui::Button("确认天赋并开始", ImVec2(180.0f, 40.0f)))
+        if (ImGui::Button("确认天赋并开始", ImVec2(kPrimaryButtonWidth, kSecondaryButtonHeight)))
         {
             ApplyTalentAllocation();
         }
         ImGui::SameLine();
-        if (ImGui::Button("返回难度选择", ImVec2(160.0f, 40.0f)))
+        if (ImGui::Button("返回难度选择", ImVec2(kSecondaryButtonWidth, kSecondaryButtonHeight)))
         {
             ResetToHome();
         }
@@ -1552,14 +1426,15 @@ namespace
             const int codeTime = calculateCodeTime(sp);
             const double thinkRate = calculateThinkSuccessRate(sp);
             const double codeRate = calculateCodeSuccessRate(sp);
-            const bool completed = isCodeComplete[problemIdx][i];
-            const bool canThink = !completed && thinkProgress[problemIdx][i] < thinkTime && timePoints > 0;
-            const bool canCode = !completed && thinkProgress[problemIdx][i] >= thinkTime &&
-                                 codeProgress[problemIdx][i] < codeTime && timePoints > 0;
+            const auto& cs = contestStates[problemIdx][i];
+            const bool completed = cs.isCodeComplete;
+            const bool canThink = !completed && cs.thinkProgress < thinkTime && timePoints > 0;
+            const bool canCode = !completed && cs.thinkProgress >= thinkTime &&
+                                 cs.codeProgress < codeTime && timePoints > 0;
             const bool mustModifyBeforeRecheck = !completed && !isCurrentContestIOI() &&
-                                                 requiresCodeModification[problemIdx][i];
+                                                 cs.requiresCodeModification;
             const int requiredFixes = sp.branch + 1;
-            const bool canCheck = !completed && codeProgress[problemIdx][i] >= codeTime &&
+            const bool canCheck = !completed && cs.codeProgress >= codeTime &&
                                   (isCurrentContestIOI() || timePoints > 0) &&
                                   !mustModifyBeforeRecheck;
 
@@ -1576,18 +1451,18 @@ namespace
             ImGui::TextWrapped("%s", BuildRequirementText(sp, problemIdx, static_cast<int>(i)).c_str());
             ImGui::Spacing();
             const std::string thinkTotalText = getThinkTimeDisplayTotal(problemIdx, static_cast<int>(i));
-            ImGui::Text("思考进度：%d / %s", thinkProgress[problemIdx][i], thinkTotalText.c_str());
-            ImGui::Text("代码进度：%d / %d", codeProgress[problemIdx][i], codeTime);
-            if (mustModifyBeforeRecheck || modificationCount[problemIdx][i] > 0)
+            ImGui::Text("思考进度：%d / %s", cs.thinkProgress, thinkTotalText.c_str());
+            ImGui::Text("代码进度：%d / %d", cs.codeProgress, codeTime);
+            if (mustModifyBeforeRecheck || cs.modificationCount > 0)
             {
-                ImGui::Text("修改进度：%d / %d", modificationCount[problemIdx][i], requiredFixes);
+                ImGui::Text("修改进度：%d / %d", cs.modificationCount, requiredFixes);
             }
             ImGui::Text("思考成功率：%d%%", static_cast<int>(thinkRate * 100));
             ImGui::Text("写代码成功率：%d%%", static_cast<int>(codeRate * 100));
-            if (errorRates[problemIdx][i] >= 0.0)
+            if (cs.errorRate >= 0.0)
             {
                 ImGui::Text("%s出错概率：%d%%", isCurrentContestIOI() ? "提交" : "对拍",
-                            static_cast<int>(errorRates[problemIdx][i] * 100));
+                            static_cast<int>(cs.errorRate * 100));
             }
             else
             {
@@ -1624,8 +1499,8 @@ namespace
 
             // 修改代码按钮（仅非IOI比赛，对拍失败后）
             const bool canModify = !completed &&
-                                   codeProgress[problemIdx][i] >= codeTime &&
-                                   requiresCodeModification[problemIdx][i] &&
+                                   cs.codeProgress >= codeTime &&
+                                   cs.requiresCodeModification &&
                                    !isCurrentContestIOI() &&
                                    timePoints > 0;
             if (canModify)
@@ -1701,8 +1576,7 @@ namespace
 
     void GuiApp::RenderGameOver()
     {
-        ImGui::TextUnformatted("游戏结束");
-        ImGui::Separator();
+        RenderPageHeader("游戏结束");
         ImGui::TextWrapped("%s", gameOver_.reason.c_str());
         ImGui::Spacing();
         ImGui::TextWrapped("%s", BuildEndingSummary().c_str());
@@ -1723,7 +1597,7 @@ namespace
         }
 
         ImGui::Spacing();
-        if (ImGui::Button("重新开始", ImVec2(160.0f, 40.0f)))
+        if (ImGui::Button("重新开始", ImVec2(kSecondaryButtonWidth, kSecondaryButtonHeight)))
         {
             ResetToHome();
         }

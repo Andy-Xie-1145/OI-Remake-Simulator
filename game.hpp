@@ -9,6 +9,7 @@
 #include <vector>
 #include <algorithm>
 #include <set>
+#include <functional>
 
 // ========== 全局状态（完全复制原版变量） ==========
 inline PlayerStats playerStats;
@@ -20,16 +21,22 @@ inline int totalProblems = 0;
 inline std::string currentContestName = "NOIP";
 inline bool debugmode = false;
 
+// 比赛子问题统一状态
+struct ContestSubProblemState
+{
+	int thinkProgress = 0;
+	int codeProgress = 0;
+	bool isCodeComplete = false;
+	double errorRate = -1.0;
+	int modificationCount = 0;
+	bool hasAttemptedCheck = false;
+	bool requiresCodeModification = false;
+};
+
 // 题目状态
 inline std::vector<Problem> problems;
 inline std::vector<std::vector<SubProblem>> subProblems;
-inline std::vector<std::vector<int>> thinkProgress;
-inline std::vector<std::vector<int>> codeProgress;
-inline std::vector<std::vector<bool>> isCodeComplete;
-inline std::vector<std::vector<double>> errorRates;
-inline std::vector<std::vector<int>> modificationCount;  // 修改代码次数跟踪
-inline std::vector<std::vector<bool>> hasAttemptedCheck;  // 是否已尝试对拍
-inline std::vector<std::vector<bool>> requiresCodeModification;  // 是否必须返工后才能再次对拍
+inline std::vector<std::vector<ContestSubProblemState>> contestStates;
 
 // 操作记录
 inline std::vector<std::string> lastActions;
@@ -52,6 +59,8 @@ struct PendingContestNotice {
 };
 
 inline PendingContestNotice pendingContestNotice;
+
+
 
 // ========== 日志函数 ==========
 inline void logEvent(const std::string& message, const std::string& type = "") {
@@ -106,6 +115,8 @@ inline PendingContestNotice consumePendingContestNotice() {
     clearPendingContestNotice();
     return notice;
 }
+
+
 
 // ========== 计算函数（完全复制原版） ==========
 
@@ -193,7 +204,7 @@ inline int getActiveBlurLevel(int problemIdx, int subProblemIdx) {
 
     const auto& sp = subProblems[problemIdx][subProblemIdx];
     const int thinkTime = calculateThinkTime(sp);
-    if (thinkProgress[problemIdx][subProblemIdx] >= thinkTime) return 0;
+    if (contestStates[problemIdx][subProblemIdx].thinkProgress >= thinkTime) return 0;
     return getEffectiveBlurLevel(problems[problemIdx], sp);
 }
 
@@ -309,81 +320,81 @@ inline void triggerRandomEvent(int problemIdx, int subProblemIdx) {
         return true;
     };
 
-    std::vector<PendingEvent> pendingEvents;
-
-    for (int idx = 0; idx < 5; ++idx) {
-        bool condition = false;
-        double probability = 0.0;
+    // 随机事件定义：条件、概率、名称、描述、效果文本、效果回调
+    struct RandomEventDef
+    {
+        std::function<bool()> condition;
+        double probability;
         std::string name;
         std::string description;
         std::string effectText;
+        std::function<void()> apply;  // 触发时的效果
+    };
 
-        switch (idx) {
-        case 0:
-            condition = lastActions.size() >= 3 &&
-                lastActions[lastActions.size() - 1] == lastActions[lastActions.size() - 2] &&
-                lastActions[lastActions.size() - 2] == lastActions[lastActions.size() - 3];
-            probability = 0.04 * (1.0 - luckReduction);  // Luck reduces negative events
-            name = "心态爆炸";
-            description = "连续失败让你感到沮丧...";
-            effectText = "心态值-1";
-            break;
-        case 1:
-            condition = !lastActions.empty() && lastActions.back() == "think" &&
-                thinkProgress[problemIdx][subProblemIdx] > calculateThinkTime(currentSubProblem) / 2;
-            probability = 0.03;  // Positive event, not affected by luck
-            name = "灵光一闪";
-            description = "突然想到了一个好方法！";
-            effectText = "心态值+1";
-            break;
-        case 2:
-            condition = lastNAre(lastActions, 2, "code") &&
-                codeProgress[problemIdx][subProblemIdx] > calculateCodeTime(currentSubProblem) / 2;
-            probability = 0.03 * (1.0 - luckReduction);  // Luck reduces negative events
-            name = "代码bug";
-            description = "写着写着发现之前的代码有问题...";
-            effectText = "代码进度-1";
-            break;
-        case 3:
-            condition = lastNAre(lastActions, 2, "code");
-            probability = 0.02 * (1.0 - luckReduction);  // Luck reduces negative events
-            name = "键盘故障";
-            description = "键盘突然有点不太灵了...";
-            effectText = "心态值-1";
-            break;
-        case 4:
-            condition = true;
-            probability = 0.01 * (1.0 - luckReduction);  // Luck reduces negative events
-            name = "监考老师巡视";
-            description = "监考老师正在经过你的座位...";
-            effectText = "心态值-1";
-            break;
-        }
+    auto& cs = contestStates[problemIdx][subProblemIdx];
+    const int thinkTime = calculateThinkTime(currentSubProblem);
+    const int codeTime = calculateCodeTime(currentSubProblem);
 
-        if (!condition) continue;
-        pendingEvents.push_back({idx, probability, name, description, effectText});
-    }
-
-    if (pendingEvents.empty()) return;
+    const RandomEventDef eventDefs[] = {
+        {
+            [&]() {
+                return lastActions.size() >= 3 &&
+                    lastActions[lastActions.size() - 1] == lastActions[lastActions.size() - 2] &&
+                    lastActions[lastActions.size() - 2] == lastActions[lastActions.size() - 3];
+            },
+            0.04 * (1.0 - luckReduction),
+            "心态爆炸", "连续失败让你感到沮丧...", "心态值-1",
+            [&]() { mood = std::max(0, mood - 1); }
+        },
+        {
+            [&]() {
+                return !lastActions.empty() && lastActions.back() == "think" &&
+                    cs.thinkProgress > thinkTime / 2;
+            },
+            0.03,
+            "灵光一闪", "突然想到了一个好方法！", "心态值+1",
+            [&]() { mood = std::min(MOOD_LIMIT, mood + 1); }
+        },
+        {
+            [&]() {
+                return lastNAre(lastActions, 2, "code") &&
+                    cs.codeProgress > codeTime / 2;
+            },
+            0.03 * (1.0 - luckReduction),
+            "代码bug", "写着写着发现之前的代码有问题...", "代码进度-1",
+            [&]() { cs.codeProgress = std::max(0, cs.codeProgress - 1); }
+        },
+        {
+            [&]() { return lastNAre(lastActions, 2, "code"); },
+            0.02 * (1.0 - luckReduction),
+            "键盘故障", "键盘突然有点不太灵了...", "心态值-1",
+            [&]() { mood = std::max(0, mood - 1); }
+        },
+        {
+            [&]() { return true; },
+            0.01 * (1.0 - luckReduction),
+            "监考老师巡视", "监考老师正在经过你的座位...", "心态值-1",
+            [&]() { mood = std::max(0, mood - 1); }
+        },
+    };
 
     const double roll = Utils::randomDouble(0.0, 1.0);
     double accumulated = 0.0;
-    for (const auto& event : pendingEvents) {
-        accumulated += event.probability;
+    for (const auto& def : eventDefs) {
+        if (!def.condition()) continue;
+        accumulated += def.probability;
         if (roll >= accumulated) continue;
 
-        if (event.idx == 0 || event.idx == 3 || event.idx == 4) mood = std::max(0, mood - 1);
-        else if (event.idx == 1) mood = std::min(MOOD_LIMIT, mood + 1);
-        else if (event.idx == 2) codeProgress[problemIdx][subProblemIdx] = std::max(0, codeProgress[problemIdx][subProblemIdx] - 1);
+        def.apply();
 
-        logEvent("触发突发事件：" + event.name, "event");
-        logEvent(event.description, "event");
-        logEvent(event.effectText, "event");
+        logEvent("触发突发事件：" + def.name, "event");
+        logEvent(def.description, "event");
+        logEvent(def.effectText, "event");
         logEvent("当前心态值：" + std::to_string(mood), "event");
         pendingContestNotice.active = true;
-        pendingContestNotice.title = "突发事件：" + event.name;
-        pendingContestNotice.description = event.description;
-        pendingContestNotice.effectText = event.effectText;
+        pendingContestNotice.title = "突发事件：" + def.name;
+        pendingContestNotice.description = def.description;
+        pendingContestNotice.effectText = def.effectText;
         return;
     }
 }
@@ -397,13 +408,7 @@ inline void startContest(int contestId) {
     currentProblem = 1;
     problems.clear();
     subProblems.clear();
-    thinkProgress.clear();
-    codeProgress.clear();
-    isCodeComplete.clear();
-    errorRates.clear();
-    modificationCount.clear();
-    hasAttemptedCheck.clear();  // 清除对拍标志
-    requiresCodeModification.clear();
+    contestStates.clear();
     clearPendingContestNotice();
     
     totalProblems = (int)config.problemRanges.size();
@@ -426,13 +431,7 @@ inline void startContest(int contestId) {
     // 初始化状态
     for (const auto& prob : problems) {
         subProblems.push_back(prob.parts);
-        thinkProgress.push_back(std::vector<int>(prob.parts.size(), 0));
-        codeProgress.push_back(std::vector<int>(prob.parts.size(), 0));
-        isCodeComplete.push_back(std::vector<bool>(prob.parts.size(), false));
-        errorRates.push_back(std::vector<double>(prob.parts.size(), -1.0));
-        modificationCount.push_back(std::vector<int>(prob.parts.size(), 0));  // 初始化修改计数
-        hasAttemptedCheck.push_back(std::vector<bool>(prob.parts.size(), false));  // 初始化对拍标志
-        requiresCodeModification.push_back(std::vector<bool>(prob.parts.size(), false));
+        contestStates.push_back(std::vector<ContestSubProblemState>(prob.parts.size()));
     }
     
     // 心态下降
@@ -448,6 +447,7 @@ inline void startContest(int contestId) {
 inline void thinkSubProblem(int problemIdx, int subProblemIdx) {
     if (timePoints <= 0) return;
     const auto& sp = subProblems[problemIdx][subProblemIdx];
+    auto& state = contestStates[problemIdx][subProblemIdx];
     double invalidProb = 1.0 - calculateThinkSuccessRate(sp);
     timePoints--;
     
@@ -460,12 +460,12 @@ inline void thinkSubProblem(int problemIdx, int subProblemIdx) {
             if (moodDrop > 0) logEvent("红温效应，心态-" + std::to_string(moodDrop), "think");
         }
     } else {
-        thinkProgress[problemIdx][subProblemIdx]++;
+        state.thinkProgress++;
         logEvent("T" + std::to_string(problemIdx+1) + " 部分分" + std::to_string(subProblemIdx+1) + " 思考成功！", "think");
         if (sp.independent == 0) {
             for (size_t i = 0; i < (size_t)subProblemIdx; i++) {
                 if (subProblems[problemIdx][i].independent == 0) {
-                    thinkProgress[problemIdx][i]++;
+                    contestStates[problemIdx][static_cast<int>(i)].thinkProgress++;
                     logEvent("T" + std::to_string(problemIdx+1) + " 部分分" + std::to_string(i+1) + " 非独立+1", "think");
                 }
             }
@@ -479,6 +479,7 @@ inline void thinkSubProblem(int problemIdx, int subProblemIdx) {
 inline void writeCodeSubProblem(int problemIdx, int subProblemIdx) {
     if (timePoints <= 0) return;
     const auto& sp = subProblems[problemIdx][subProblemIdx];
+    auto& state = contestStates[problemIdx][subProblemIdx];
     double invalidProb = 1.0 - calculateCodeSuccessRate(sp);
     timePoints--;
     
@@ -491,10 +492,10 @@ inline void writeCodeSubProblem(int problemIdx, int subProblemIdx) {
             logEvent("红温效应，心态-" + std::to_string(moodDrop), "code");
         }
     } else {
-        codeProgress[problemIdx][subProblemIdx]++;
+        state.codeProgress++;
         logEvent("T" + std::to_string(problemIdx+1) + " 部分分" + std::to_string(subProblemIdx+1) + " 写代码成功！", "code");
-        if (codeProgress[problemIdx][subProblemIdx] >= calculateCodeTime(sp)) {
-            errorRates[problemIdx][subProblemIdx] = calculateErrorRate(sp);
+        if (state.codeProgress >= calculateCodeTime(sp)) {
+            state.errorRate = calculateErrorRate(sp);
             if (sp.inspire > 0) {
                 mood = std::min(MOOD_LIMIT, mood + sp.inspire);
                 logEvent("激励效果，心态+" + std::to_string(sp.inspire), "code");
@@ -507,32 +508,30 @@ inline void writeCodeSubProblem(int problemIdx, int subProblemIdx) {
 
 // 对拍/提交部分分
 inline void checkCodeSubProblem(int problemIdx, int subProblemIdx) {
-    bool isIOIContest = false;
-    for (const auto& cfg : CONTEST_CONFIGS) {
-        if (cfg.second.name == currentContestName && cfg.second.isIOI) { isIOIContest = true; break; }
-    }
-    if (!isIOIContest && requiresCodeModification[problemIdx][subProblemIdx]) {
+    const bool isIOIContest = isCurrentContestIOI();
+    auto& state = contestStates[problemIdx][subProblemIdx];
+    if (!isIOIContest && state.requiresCodeModification) {
         logEvent("需要先修改代码，才能再次对拍！", "check");
         return;
     }
     if (!isIOIContest && timePoints <= 0) return;
     if (!isIOIContest) timePoints--;
-    
+
     pushLastAction("check");
 
-    hasAttemptedCheck[problemIdx][subProblemIdx] = true;  // 标记已尝试对拍
+    state.hasAttemptedCheck = true;
 
     logEvent((isIOIContest ? "提交" : "对拍") + std::string(" T") + std::to_string(problemIdx+1) + " 部分分" + std::to_string(subProblemIdx+1), "check");
     
-    double errorRate = errorRates[problemIdx][subProblemIdx];
+    double errorRate = state.errorRate;
     if (Utils::randomBool(errorRate)) {
         if (isIOIContest && Utils::randomBool(0.08 * (1.0 - calculateLuckReduction()))) {
             mood = std::max(0, mood - 1);
             logEvent("服务器爆炸，心态-1", "check");
         } else {
             if (!isIOIContest) {
-                requiresCodeModification[problemIdx][subProblemIdx] = true;
-                modificationCount[problemIdx][subProblemIdx] = 0;
+                state.requiresCodeModification = true;
+                state.modificationCount = 0;
                 logEvent("对拍失败！需要修改代码后才能再次对拍", "check");
             } else {
                 logEvent("提交失败！", "check");
@@ -540,7 +539,7 @@ inline void checkCodeSubProblem(int problemIdx, int subProblemIdx) {
         }
     } else {
         const auto& sp = subProblems[problemIdx][subProblemIdx];
-        isCodeComplete[problemIdx][subProblemIdx] = true;
+        state.isCodeComplete = true;
         logEvent((isIOIContest ? "提交" : "对拍") + std::string("成功！获得 ") + std::to_string(sp.score) + " 分", "check");
         if (sp.inspire > 0) mood = std::min(MOOD_LIMIT, mood + sp.inspire);
     }
@@ -551,8 +550,9 @@ inline void checkCodeSubProblem(int problemIdx, int subProblemIdx) {
 inline void modifyCodeSubProblem(int problemIdx, int subProblemIdx) {
     const SubProblem& sp = subProblems[problemIdx][subProblemIdx];
     const int requiredFixes = sp.branch + 1;
+    auto& state = contestStates[problemIdx][subProblemIdx];
 
-    if (!requiresCodeModification[problemIdx][subProblemIdx]) {
+    if (!state.requiresCodeModification) {
         logEvent("当前不需要修改代码。", "code");
         return;
     }
@@ -568,20 +568,20 @@ inline void modifyCodeSubProblem(int problemIdx, int subProblemIdx) {
     double invalidProb = 1.0 - calculateCodeSuccessRate(sp);
     if (Utils::randomBool(invalidProb)) {
         logEvent("修改代码失败！当前进度 " +
-                 std::to_string(modificationCount[problemIdx][subProblemIdx]) + " / " +
+                 std::to_string(state.modificationCount) + " / " +
                  std::to_string(requiredFixes), "code");
     } else {
-        modificationCount[problemIdx][subProblemIdx]++;
+        state.modificationCount++;
         logEvent("修改代码成功！当前进度 " +
-                 std::to_string(modificationCount[problemIdx][subProblemIdx]) + " / " +
+                 std::to_string(state.modificationCount) + " / " +
                  std::to_string(requiredFixes), "code");
 
-        if (modificationCount[problemIdx][subProblemIdx] >= requiredFixes) {
-            requiresCodeModification[problemIdx][subProblemIdx] = false;
-            hasAttemptedCheck[problemIdx][subProblemIdx] = false;
-            errorRates[problemIdx][subProblemIdx] = calculateErrorRate(sp);
+        if (state.modificationCount >= requiredFixes) {
+            state.requiresCodeModification = false;
+            state.hasAttemptedCheck = false;
+            state.errorRate = calculateErrorRate(sp);
             logEvent("已完成全部修改，可再次对拍。新的出错概率为 " +
-                     std::to_string(static_cast<int>(errorRates[problemIdx][subProblemIdx] * 100)) + "%", "code");
+                     std::to_string(static_cast<int>(state.errorRate * 100)) + "%", "code");
         }
     }
 }
@@ -589,7 +589,7 @@ inline void modifyCodeSubProblem(int problemIdx, int subProblemIdx) {
 inline bool isFullScore() {
     for (int i = 0; i < totalProblems; i++) {
         int lastIdx = (int)subProblems[i].size() - 1;
-        if (!isCodeComplete[i][lastIdx]) return false;
+        if (!contestStates[i][lastIdx].isCodeComplete) return false;
     }
     return true;
 }
@@ -599,7 +599,7 @@ inline int calculateScore() {
     for (int i = 0; i < totalProblems; i++) {
         int maxScore = 0;
         for (size_t j = 0; j < subProblems[i].size(); j++) {
-            if (isCodeComplete[i][j]) maxScore = std::max(maxScore, subProblems[i][j].score);
+            if (contestStates[i][j].isCodeComplete) maxScore = std::max(maxScore, subProblems[i][j].score);
         }
         total += maxScore;
     }
@@ -610,58 +610,108 @@ inline int calculateScore() {
 inline std::string calculateAward(int score, const std::string& contestType) {
     double mult = difficultyMultiplier();
     std::string award;
-    
-    if (contestType == "CSP-S" || contestType == "NOIP") {
-        if (score >= 270 * mult) award = "一等奖";
-        else if (score >= 180 * mult) award = "二等奖";
-        else if (score >= 50 * mult) award = "三等奖";
-        else award = "没有获奖";
-        playerStats.achievements.push_back(contestType + "：" + std::to_string(score) + "分，" + award);
-    } else if (contestType == "WC" || contestType == "APIO") {
-        if (score >= 220 * mult) award = "金牌";
-        else if (score >= 160 * mult) award = "银牌";
-        else if (score >= 100 * mult) award = "铜牌";
-        else award = "铁牌";
-        playerStats.achievements.push_back(contestType + "：" + std::to_string(score) + "分，" + award);
-    } else if (contestType == "省选") {
-        int totalScore = playerStats.tempScore;
-        playerStats.isProvincialTeamA = false;
-        if (totalScore >= 700 * mult) {
-            award = "省队A队";
-            playerStats.isProvincialTeamA = true;
-        } else if (totalScore >= 600 * mult) {
-            award = "省队B队";
-        } else {
-            award = "没有进队";
+
+    // 分数阈值层：从高到低，首个满足即为对应奖项
+    struct Threshold
+    {
+        int scoreBase;           // 基础分数线
+        const char* awardName;   // 对应奖项名
+        std::function<void()> onAward;  // 获奖时的副作用（设置 flag 等）
+    };
+
+    // 比赛评奖规则：contestType → (是否使用 tempScore, 分数阈值数组)
+    // 使用 tempScore 的比赛：省选、NOI、CTT、CTS、IOI
+    struct AwardRule
+    {
+        std::string type;       // contestType 匹配值
+        bool useTempScore;      // true 则用 playerStats.tempScore 而非传入的 score
+        std::vector<Threshold> thresholds;  // 分数阈值（从高到低）
+        std::function<void()> preCheck;     // 评奖前的预处理（如重置 flag）
+        std::function<void(const std::string&)> postCheck;  // 评奖后的额外处理
+    };
+
+    static const AwardRule rules[] = {
+        {
+            "CSP-S", false,
+            {{270, "一等奖", nullptr}, {180, "二等奖", nullptr}, {50, "三等奖", nullptr}, {0, "没有获奖", nullptr}},
+            nullptr, nullptr
+        },
+        {
+            "NOIP", false,
+            {{270, "一等奖", nullptr}, {180, "二等奖", nullptr}, {50, "三等奖", nullptr}, {0, "没有获奖", nullptr}},
+            nullptr, nullptr
+        },
+        {
+            "WC", false,
+            {{220, "金牌", nullptr}, {160, "银牌", nullptr}, {100, "铜牌", nullptr}, {0, "铁牌", nullptr}},
+            nullptr, nullptr
+        },
+        {
+            "APIO", false,
+            {{220, "金牌", nullptr}, {160, "银牌", nullptr}, {100, "铜牌", nullptr}, {0, "铁牌", nullptr}},
+            nullptr, nullptr
+        },
+        {
+            "省选", true,
+            {{700, "省队A队", []() { playerStats.isProvincialTeamA = true; }},
+             {600, "省队B队", nullptr}, {0, "没有进队", nullptr}},
+            []() { playerStats.isProvincialTeamA = false; },  // 预处理：重置 A 队 flag
+            [](const std::string& aw) { playerStats.isProvincialTeam = (aw.find("省队") != std::string::npos); }
+        },
+        {
+            "NOI", true,
+            {{400, "金牌", []() { playerStats.isTrainingTeam = true; }},
+             {300, "银牌", nullptr}, {200, "铜牌", nullptr}, {0, "铁牌", nullptr}},
+            nullptr, nullptr
+        },
+        {
+            "CTT", true,
+            {{600, "入选候选队", []() { playerStats.isCandidateTeam = true; }},
+             {0, "没有入选候选队", nullptr}},
+            nullptr, nullptr
+        },
+        {
+            "CTS", true,
+            {{900, "入选国家队", []() { playerStats.isNationalTeam = true; }},
+             {0, "没有入选国家队", nullptr}},
+            nullptr, nullptr
+        },
+        {
+            "IOI", true,
+            {{400, "金牌", []() { playerStats.isIOIgold = true; }},
+             {300, "银牌", nullptr}, {200, "铜牌", nullptr}, {0, "铁牌", nullptr}},
+            nullptr, nullptr
+        },
+    };
+
+    for (const auto& rule : rules)
+    {
+        if (contestType != rule.type) continue;
+
+        int evalScore = rule.useTempScore ? playerStats.tempScore : score;
+
+        // 预处理
+        if (rule.preCheck) rule.preCheck();
+
+        // 从高到低匹配阈值
+        for (const auto& th : rule.thresholds)
+        {
+            if (evalScore >= static_cast<int>(th.scoreBase * mult))
+            {
+                award = th.awardName;
+                if (th.onAward) th.onAward();
+                break;
+            }
         }
-        playerStats.isProvincialTeam = award.find("省队") != std::string::npos;
-        playerStats.achievements.push_back("省选：" + std::to_string(totalScore) + "分，" + award);
-    } else if (contestType == "NOI") {
-        int totalScore = playerStats.tempScore;
-        if (totalScore >= 400 * mult) { award = "金牌"; playerStats.isTrainingTeam = true; }
-        else if (totalScore >= 300 * mult) award = "银牌";
-        else if (totalScore >= 200 * mult) award = "铜牌";
-        else award = "铁牌";
-        playerStats.achievements.push_back("NOI：" + std::to_string(totalScore) + "分，" + award);
-    } else if (contestType == "CTT") {
-        int totalScore = playerStats.tempScore;
-        award = totalScore >= 600 * mult ? "入选候选队" : "没有入选候选队";
-        if (totalScore >= 600 * mult) playerStats.isCandidateTeam = true;
-        playerStats.achievements.push_back("CTT：" + std::to_string(totalScore) + "分，" + award);
-    } else if (contestType == "CTS") {
-        int totalScore = playerStats.tempScore;
-        award = totalScore >= 900 * mult ? "入选国家队" : "没有入选国家队";
-        if (totalScore >= 900 * mult) playerStats.isNationalTeam = true;
-        playerStats.achievements.push_back("CTS：" + std::to_string(totalScore) + "分，" + award);
-    } else if (contestType == "IOI") {
-        int totalScore = playerStats.tempScore;
-        if (totalScore >= 400 * mult) { award = "金牌"; playerStats.isIOIgold = true; }
-        else if (totalScore >= 300 * mult) award = "银牌";
-        else if (totalScore >= 200 * mult) award = "铜牌";
-        else award = "铁牌";
-        playerStats.achievements.push_back("IOI：" + std::to_string(totalScore) + "分，" + award);
+
+        // 后处理
+        if (rule.postCheck) rule.postCheck(award);
+
+        // 记录成就
+        playerStats.achievements.push_back(contestType + "：" + std::to_string(evalScore) + "分，" + award);
+        break;
     }
-    
+
     if (isTopAwardForExperience(contestType, award)) {
         addTempExperience(1, contestType + "最高奖项奖励");
     }
@@ -671,72 +721,63 @@ inline std::string calculateAward(int score, const std::string& contestType) {
 
 // ========== 获取训练事件类型（GUI 与共享逻辑共用） ==========
 inline std::string getTrainingEventType(int currentEvent, int /*totalEvents*/) {
-    // 根据当前阶段和事件序号决定事件类型
-    if (currentPhase == 1) { 
-        // 第一次训练(5次)：【长期训练】【提升训练/比赛训练】【娱乐时间】【提升训练/比赛训练】【考前一天】
-        if (currentEvent == 1) return "长期训练";
-        else if (currentEvent == 2 || currentEvent == 4) 
+    // 表驱动：phase → 事件序列模板，每个元素为固定字符串或 "提升/比赛" 随机选择
+    struct EventEntry
+    {
+        std::string fixed;  // 非空则直接返回
+        bool isRandom;      // 为 true 时从 {"提升训练", "比赛训练"} 随机
+    };
+
+    using EventSeq = std::vector<EventEntry>;
+    static const std::vector<int> phases_5events = {19, 31, 38};
+    static const std::vector<int> phases_4events = {3, 5, 7, 11, 13, 26, 29, 35, 50};
+    static const std::vector<int> phases_2events = {9, 15, 21, 33, 40, 45};
+    static const std::vector<int> phases_6events = {42, 53};
+
+    static const EventSeq seq_phase1 = {
+        {"长期训练", false}, {"", true}, {"娱乐时间", false}, {"", true}, {"赛前一天", false}};
+    static const EventSeq seq_phase17 = {
+        {"步入高二", false}, {"长期训练", false}, {"", true}, {"", true},
+        {"娱乐时间", false}, {"", true}, {"焦虑", false}, {"赛前一天", false}};
+    static const EventSeq seq_5events = {
+        {"", true}, {"娱乐时间", false}, {"焦虑", false}, {"遗忘", false}, {"赛前一天", false}};
+    static const EventSeq seq_4events = {
+        {"", true}, {"娱乐时间", false}, {"焦虑", false}, {"赛前一天", false}};
+    static const EventSeq seq_2events = {
+        {"焦虑", false}, {"赛前一天", false}};
+    static const EventSeq seq_6events = {
+        {"", true}, {"娱乐时间", false}, {"", true}, {"娱乐时间", false}, {"焦虑", false}, {"赛前一天", false}};
+
+    const EventSeq* seq = nullptr;
+    if (currentPhase == 1) seq = &seq_phase1;
+    else if (currentPhase == 17) seq = &seq_phase17;
+    else if (std::find(phases_5events.begin(), phases_5events.end(), currentPhase) != phases_5events.end()) seq = &seq_5events;
+    else if (std::find(phases_4events.begin(), phases_4events.end(), currentPhase) != phases_4events.end()) seq = &seq_4events;
+    else if (std::find(phases_2events.begin(), phases_2events.end(), currentPhase) != phases_2events.end()) seq = &seq_2events;
+    else if (std::find(phases_6events.begin(), phases_6events.end(), currentPhase) != phases_6events.end()) seq = &seq_6events;
+
+    if (seq != nullptr && currentEvent >= 1 && currentEvent <= static_cast<int>(seq->size()))
+    {
+        const auto& entry = (*seq)[currentEvent - 1];
+        if (entry.isRandom)
+        {
             return Utils::randomBool(0.5) ? "提升训练" : "比赛训练";
-        else if (currentEvent == 3) return "娱乐时间";
-        else if (currentEvent == 5) return "赛前一天";
-    } else if (currentPhase == 17) { 
-        // 第八次训练(8次)：【步入高二】【长期训练】【提升训练/比赛训练】【提升训练/比赛训练】【娱乐时间】【提升训练/比赛训练】【焦虑】【考前一天】
-        if (currentEvent == 1) return "步入高二";
-        else if (currentEvent == 2) return "长期训练";
-        else if (currentEvent == 3 || currentEvent == 4 || currentEvent == 6) 
-            return Utils::randomBool(0.5) ? "提升训练" : "比赛训练";
-        else if (currentEvent == 5) return "娱乐时间";
-        else if (currentEvent == 7) return "焦虑";
-        else if (currentEvent == 8) return "赛前一天";
-    } else if (currentPhase == 19 || currentPhase == 31 || currentPhase == 38) { 
-        // 5次训练：【提升训练/比赛训练】【娱乐时间】【焦虑】【遗忘】【考前一天】
-        if (currentEvent == 1) return Utils::randomBool(0.5) ? "提升训练" : "比赛训练";
-        else if (currentEvent == 2) return "娱乐时间";
-        else if (currentEvent == 3) return "焦虑";
-        else if (currentEvent == 4) return "遗忘";
-        else if (currentEvent == 5) return "赛前一天";
-    } else if (currentPhase == 3 || currentPhase == 5 || currentPhase == 7 || 
-               currentPhase == 11 || currentPhase == 13 || currentPhase == 26 || 
-               currentPhase == 29 || currentPhase == 35 || currentPhase == 50) { 
-        // 4次训练：【提升训练/比赛训练】【娱乐时间】【焦虑】【考前一天】
-        if (currentEvent == 1) return Utils::randomBool(0.5) ? "提升训练" : "比赛训练";
-        else if (currentEvent == 2) return "娱乐时间";
-        else if (currentEvent == 3) return "焦虑";
-        else if (currentEvent == 4) return "赛前一天";
-    } else if (currentPhase == 9 || currentPhase == 15 || currentPhase == 21 || 
-               currentPhase == 33 || currentPhase == 40 || currentPhase == 45) { 
-        // 2次训练：【焦虑】【考前一天】
-        if (currentEvent == 1) return "焦虑";
-        else if (currentEvent == 2) return "赛前一天";
-    } else if (currentPhase == 42 || currentPhase == 53) { 
-        // 6次训练：【提升训练/比赛训练】【娱乐时间】【提升训练/比赛训练】【娱乐时间】【焦虑】【考前一天】
-        if (currentEvent == 1 || currentEvent == 3) 
-            return Utils::randomBool(0.5) ? "提升训练" : "比赛训练";
-        else if (currentEvent == 2 || currentEvent == 4) return "娱乐时间";
-        else if (currentEvent == 5) return "焦虑";
-        else if (currentEvent == 6) return "赛前一天";
+        }
+        return entry.fixed;
     }
-    
-    // 默认返回提升训练
+
     return "提升训练";
 }
 
 // ========== 游戏初始化和主流程 ==========
 
 inline void initGame() {
+    // 差异初始化：题库初始化 + 难度相关设定
     initProblemPool();
-    playerStats = PlayerStats();
     auto settings = DIFFICULTY_SETTINGS.at(gameDifficulty);
     playerStats.determination = settings.initialDetermination;
     playerStats.extraMoodDrop = (gameDifficulty == "expert") ? 2 : (gameDifficulty == "easy") ? 0 : 1;
-    mood = 10;
-    currentPhase = 1;
-    currentProblem = 1;
-    totalProblems = 0;
-    currentContestName = "NOIP";
-    gameLog.clear();
     currentShopPrices = INITIAL_SHOP_PRICES.at(gameDifficulty);
-    clearShopState();
 }
 
 
