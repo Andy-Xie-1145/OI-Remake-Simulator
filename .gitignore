@@ -48,6 +48,8 @@ cmake-build-*/
 # IDE
 .vs/
 .vscode/
+.claude/
+*.claude
 *.suo
 *.user
 *.sln.docstates
