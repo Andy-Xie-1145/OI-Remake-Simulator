@@ -43,7 +43,7 @@ namespace
         GameOver
     };
 
-    constexpr const char *kGameVersion = "v0.1.6-beta";
+    constexpr const char *kGameVersion = "v0.1.5-beta";
     constexpr const char *kIntroStoryText =
         "我重生了？\n"
         "参加完 2077 年的省队选拔后，高二的你意识到自己无缘今年省队了。也许从此就和 OI 无缘了。\n\n"
