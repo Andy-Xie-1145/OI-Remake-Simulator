@@ -16,6 +16,22 @@
 - 📖 **帮助系统**：顶栏全局帮助入口 + 右侧边栏帮助速查卡片
 - 🖼️ **图形界面**：使用 Dear ImGui
 
+## 获取源码
+
+本项目使用 [Git 子模块](https://git-scm.com/book/en/v2/Git-Tools-Submodules) 管理 Dear ImGui 依赖，克隆时**必须递归初始化子模块**：
+
+```bash
+git clone --recurse-submodules https://github.com/Andy-Xie-1145/OI-Remake-Simulator.git
+```
+
+如果已经克隆但忘记加 `--recurse-submodules`，执行以下命令补全：
+
+```bash
+git submodule update --init --recursive
+```
+
+> ⚠️ 未初始化子模块会导致编译失败（找不到 `imgui/imgui.h`）。
+
 ## 编译方法
 
 ### 前置要求
@@ -64,7 +80,7 @@ cmake --build . --config Release
 | `events.hpp` | 事件系统 |
 | `training_events_data.hpp` | 训练事件数据 |
 | `game.hpp` | 游戏逻辑 |
-| `imgui/` | ImGui 库 |
+| `imgui/` | ImGui 库（Git 子模块） |
 | `build.bat` | 编译脚本 |
 | `CMakeLists.txt` | CMake 构建配置 |
 
