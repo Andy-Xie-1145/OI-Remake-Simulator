@@ -66,7 +66,7 @@ cmake --build . --config Release
 
 ## 技术栈
 
-- **GUI 框架**: [Dear ImGui v1.92.6](https://github.com/ocornut/imgui)
+- **GUI 框架**: [Dear ImGui v1.92.7](https://github.com/ocornut/imgui)
 - **渲染后端**: DirectX 11
 - **平台后端**: Win32
 
