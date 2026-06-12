@@ -8,9 +8,7 @@
 #include <string>
 #include <vector>
 
-extern PlayerStats playerStats;
-extern int mood;
-extern std::map<std::string, int> currentShopPrices;
+extern GameState gameState;
 
 inline void logEvent(const std::string& message, const std::string& type);
 
@@ -40,10 +38,8 @@ struct TrainingEvent {
 
 #include "training_events_data.hpp"
 
-inline std::set<std::string> purchasedItems;
-
 inline void clearShopState() {
-    purchasedItems.clear();
+    gameState.purchasedItems.clear();
 }
 
 // applyStatDelta 中受 bounds [0, 20] 限制的属性成员指针映射
@@ -53,6 +49,10 @@ inline const std::map<std::string, int PlayerStats::*> STAT_MEMBER_MAP = {
     {"string", &PlayerStats::string},
     {"graph", &PlayerStats::graph},
     {"combinatorics", &PlayerStats::combinatorics},
+    {"math", &PlayerStats::math},
+    {"geometry", &PlayerStats::geometry},
+    {"data_structure", &PlayerStats::data_structure},
+    {"adhoc", &PlayerStats::adhoc},
     {"thinking", &PlayerStats::thinking},
     {"coding", &PlayerStats::coding},
     {"carefulness", &PlayerStats::carefulness},
@@ -67,23 +67,35 @@ inline void applyStatDelta(const std::string& key, int value, const std::string&
     // mood 特殊处理
     if (key == "mood") {
         if (optionText == "缓和心态") {
-            mood = std::max(0, std::min(MOOD_LIMIT, value));
+            gameState.mood = std::max(0, std::min(MOOD_LIMIT, value));
         } else {
-            mood = std::max(0, std::min(MOOD_LIMIT, mood + value));
+            gameState.mood = std::max(0, std::min(MOOD_LIMIT, gameState.mood + value));
         }
         return;
     }
 
     // determination 特殊处理（不受 bounds 限制）
     if (key == "determination") {
-        playerStats.determination = std::max(0, playerStats.determination + value);
+        gameState.playerStats.determination = std::max(0, gameState.playerStats.determination + value);
+        return;
+    }
+
+    // health 特殊处理 (0-20)
+    if (key == "health") {
+        gameState.health = std::max(0, std::min(20, gameState.health + value));
+        return;
+    }
+
+    // money 特殊处理 (>=0, 无上限)
+    if (key == "money") {
+        gameState.money = std::max(0, gameState.money + value);
         return;
     }
 
     // 其余属性通过成员指针映射查找
     auto it = STAT_MEMBER_MAP.find(key);
     if (it != STAT_MEMBER_MAP.end()) {
-        int& target = playerStats.*(it->second);
+        int& target = gameState.playerStats.*(it->second);
         target = std::max(0, std::min(20, target + value));
     }
 }
@@ -102,16 +114,16 @@ inline void applySelectedOptionEffects(const EventOption& option) {
 
 inline std::vector<EventOption> buildShopOptions() {
     return {
-        {"思维提升", {{"thinking", 1}}, {}, "", {}, {}, "花费" + std::to_string(currentShopPrices["思维提升"]) + "点决心提升1点思维能力", currentShopPrices["思维提升"]},
-        {"代码提升", {{"coding", 1}}, {}, "", {}, {}, "花费" + std::to_string(currentShopPrices["代码提升"]) + "点决心提升1点代码能力", currentShopPrices["代码提升"]},
-        {"细心提升", {{"carefulness", 1}}, {}, "", {}, {}, "花费" + std::to_string(currentShopPrices["细心提升"]) + "点决心提升1点细心", currentShopPrices["细心提升"]},
-        {"随机提升", {}, {"dp", "ds", "string", "graph", "combinatorics"}, "", {}, {}, "花费" + std::to_string(currentShopPrices["随机提升"]) + "点决心随机提升一项算法能力", currentShopPrices["随机提升"]},
-        {"心态恢复", {{"mood", 2}}, {}, "", {}, {}, "花费" + std::to_string(currentShopPrices["心态恢复"]) + "点决心提升2点心态", currentShopPrices["心态恢复"]},
-        {"全面提升", {{"dp", 1}, {"ds", 1}, {"string", 1}, {"graph", 1}, {"combinatorics", 1}}, {}, "", {}, {}, "花费" + std::to_string(currentShopPrices["全面提升"]) + "点决心提升所有算法能力", currentShopPrices["全面提升"]},
-        {"速度提升", {{"quickness", 1}}, {}, "", {}, {}, "花费" + std::to_string(currentShopPrices["速度提升"]) + "点决心提升1点迅捷", currentShopPrices["速度提升"]},
-        {"心理素质提升", {{"mental", 1}}, {}, "", {}, {}, "花费" + std::to_string(currentShopPrices["心理素质提升"]) + "点决心提升1点心理素质", currentShopPrices["心理素质提升"]},
-        {"经验提升", {{"experience", 1}}, {}, "", {}, {}, "花费" + std::to_string(currentShopPrices["经验提升"]) + "点决心提升1点经验", currentShopPrices["经验提升"]},
-        {"运气提升", {{"luck", 2}}, {}, "", {}, {}, "花费" + std::to_string(currentShopPrices["运气提升"]) + "点决心提升2点运气，减少负面事件", currentShopPrices["运气提升"]},
+        {"思维提升", {{"thinking", 1}}, {}, "", {}, {}, "花费" + std::to_string(gameState.currentShopPrices["思维提升"]) + "元提升1点思维能力", gameState.currentShopPrices["思维提升"]},
+        {"代码提升", {{"coding", 1}}, {}, "", {}, {}, "花费" + std::to_string(gameState.currentShopPrices["代码提升"]) + "元提升1点代码能力", gameState.currentShopPrices["代码提升"]},
+        {"细心提升", {{"carefulness", 1}}, {}, "", {}, {}, "花费" + std::to_string(gameState.currentShopPrices["细心提升"]) + "元提升1点细心", gameState.currentShopPrices["细心提升"]},
+        {"随机提升", {}, {"dp", "ds", "string", "graph", "combinatorics"}, "", {}, {}, "花费" + std::to_string(gameState.currentShopPrices["随机提升"]) + "元随机提升一项算法能力", gameState.currentShopPrices["随机提升"]},
+        {"心态恢复", {{"mood", 2}}, {}, "", {}, {}, "花费" + std::to_string(gameState.currentShopPrices["心态恢复"]) + "元提升2点心态", gameState.currentShopPrices["心态恢复"]},
+        {"全面提升", {{"dp", 1}, {"ds", 1}, {"string", 1}, {"graph", 1}, {"combinatorics", 1}}, {}, "", {}, {}, "花费" + std::to_string(gameState.currentShopPrices["全面提升"]) + "元提升所有算法能力", gameState.currentShopPrices["全面提升"]},
+        {"速度提升", {{"quickness", 1}}, {}, "", {}, {}, "花费" + std::to_string(gameState.currentShopPrices["速度提升"]) + "元提升1点迅捷", gameState.currentShopPrices["速度提升"]},
+        {"心理素质提升", {{"mental", 1}}, {}, "", {}, {}, "花费" + std::to_string(gameState.currentShopPrices["心理素质提升"]) + "元提升1点心理素质", gameState.currentShopPrices["心理素质提升"]},
+        {"经验提升", {{"experience", 1}}, {}, "", {}, {}, "花费" + std::to_string(gameState.currentShopPrices["经验提升"]) + "元提升1点经验", gameState.currentShopPrices["经验提升"]},
+        {"运气提升", {{"luck", 2}}, {}, "", {}, {}, "花费" + std::to_string(gameState.currentShopPrices["运气提升"]) + "元提升2点运气，减少负面事件", gameState.currentShopPrices["运气提升"]},
         {"放弃购买", {}, {}, "", {}, {}, "离开商店", 0}
     };
 }
@@ -129,7 +141,7 @@ inline std::vector<EventOption> getAvailableOptions(const TrainingEvent& event) 
             if (option.text == "放弃购买") {
                 leaveOption = option;
                 hasLeaveOption = true;
-            } else if (purchasedItems.find(option.text) == purchasedItems.end()) {
+            } else if (gameState.purchasedItems.find(option.text) == gameState.purchasedItems.end()) {
                 shopOptions.push_back(option);
             }
         }

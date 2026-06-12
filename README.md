@@ -1,20 +1,25 @@
-# OI 重开模拟器 v0.1.5-beta
+# OI 重开模拟器 v0.2.0
 
-> 🎮 人生重开模拟器的 OI 竞赛版本 —— 体验一名 OIer 的完整竞赛生涯
+> 人生重开模拟器的 OI 竞赛版本 —— 36 月回合制，体验一名 OIer 的完整高中生涯
 
 基于 Dear ImGui 的图形界面版本。原项目 [Little09qwq/oi-remake-game](https://github.com/Little09qwq/oi-remake-game)
 
+月回合制的设计灵感来自[这篇洛谷讨论](https://www.luogu.com.cn/article/md0iry4t)（[保存站链接](https://www.luogu.me/article/md0iry4t)）。
+
 ## 功能特性
 
-- 📚 **115 道题目**：覆盖 CSP 到 NOI 全级别难度
-- 🏆 **完整赛季**：CSP-S → NOIP → WC → 省选 → APIO → NOI → CTT → CTS → IOI
-- 🎲 **随机事件**：训练、比赛、焦虑、遗忘、决心商店...
-- 🛒 **决心商店**：用决心购买能力提升（含运气系统）
-- 🎯 **多难度模式**：简单/普通/困难/专家
-- 🍀 **运气系统**：减少负面事件发生率
-- 🔧 **修改代码**：对拍失败后分阶段返工，每次消耗 1 时间点
-- 📖 **帮助系统**：顶栏全局帮助入口 + 右侧边栏帮助速查卡片
-- 🖼️ **图形界面**：使用 Dear ImGui
+- **36 月回合制**：3 年高中生活，每月自由分配行动力（AP）
+- **9 维知识体系**：DP / 数据结构 / 字符串 / 图论 / 组合计数 / 数学 / 几何 / 高级数据结构 / 构造
+- **完整赛季**：CSP-S → NOIP → WC → 省选 → APIO → NOI → CTT → CTS → IOI
+- **文化课考试**：期中 / 期末 / 高考独立系统，跨年文化效率加权
+- **背景与特质**：7 种开局背景 + 8 种可获取特质
+- **焦虑与遗忘**：心态持续低迷触发焦虑，长期不学则知识遗忘
+- **金钱商店**：月收入 + 比赛奖金，价格递增
+- **暑假集训**：7-8 月高强度训练选项
+- **115 道题目**：覆盖入门到 NOI+ 全级别
+- **4 档难度**：简单 / 普通 / 困难 / 专家
+
+> 详细更新说明见 [`docs/v0.2.0-changelog.md`](docs/v0.2.0-changelog.md)
 
 ## 获取源码
 
@@ -30,7 +35,7 @@ git clone --recurse-submodules https://github.com/Andy-Xie-1145/OI-Remake-Simula
 git submodule update --init --recursive
 ```
 
-> ⚠️ 未初始化子模块会导致编译失败（找不到 `imgui/imgui.h`）。
+> 未初始化子模块会导致编译失败（找不到 `imgui/imgui.h`）。
 
 ## 编译方法
 
@@ -38,6 +43,7 @@ git submodule update --init --recursive
 
 - Windows 系统
 - DirectX 11（Windows 自带）
+- C++17 编译器
 
 ### 方法一：使用 build.bat（Visual Studio，推荐）
 
@@ -52,46 +58,45 @@ git submodule update --init --recursive
 ### 方法三：使用 CMake
 
 ```bash
-mkdir build
-cd build
+mkdir build && cd build
 cmake ..
 cmake --build . --config Release
 ```
 
 ## 运行
 
-> 💡 **推荐直接下载**：前往 [Releases](https://github.com/Andy-Xie-1145/OI-Remake-Simulator/releases/latest) 下载最新版本的 exe，开箱即用。
+> 前往 [Releases](https://github.com/Andy-Xie-1145/OI-Remake-Simulator/releases/latest) 下载最新版本的 exe，开箱即用。
 
 如需手动编译，编译成功后运行 `output/oi_simulator_gui.exe`。
+
+## 项目结构
+
+| 文件 | 说明 |
+|------|------|
+| `main.cpp` | 主程序入口、UI 渲染 |
+| `types.hpp` | 类型定义、常量、难度配置 |
+| `game.hpp` | 游戏逻辑（月度结算、焦虑、遗忘、经验） |
+| `story.hpp` | 月历引擎（36 月时间线、比赛/考试安排） |
+| `activities.hpp` | 月度活动定义与执行 |
+| `talents.hpp` | 背景系统 + 特质获取 |
+| `culture_exam.hpp` | 文化课考试系统 |
+| `contest.hpp` | 比赛逻辑（思考/写代码/对拍/评奖） |
+| `events.hpp` | 事件系统 + 商店 |
+| `problem_pool.hpp` | 题目池 (115 题) |
+| `training_events_data.hpp` | 训练事件数据 |
+| `imgui/` | Dear ImGui（Git 子模块） |
 
 ## 技术栈
 
 - **GUI 框架**: [Dear ImGui v1.92.7](https://github.com/ocornut/imgui)
 - **渲染后端**: DirectX 11
 - **平台后端**: Win32
-
-## 项目结构
-
-| 文件 | 说明 |
-|------|------|
-| `main.cpp` | 主程序入口 |
-| `types.hpp` | 类型定义、常量、配置 |
-| `problem_pool.hpp` | 题目池 (115 题) |
-| `events.hpp` | 事件系统 |
-| `training_events_data.hpp` | 训练事件数据 |
-| `game.hpp` | 游戏逻辑 |
-| `imgui/` | ImGui 库（Git 子模块） |
-| `build.bat` | 编译脚本 |
-| `CMakeLists.txt` | CMake 构建配置 |
+- **语言标准**: C++17
 
 ## 许可证
 
-本项目基于 [Little09qwq/oi-remake-game](https://github.com/Little09qwq/oi-remake-game) 复刻开发，并在其基础上持续维护和扩展新内容（如经验系统、模糊机制等）。
+本项目基于 [Little09qwq/oi-remake-game](https://github.com/Little09qwq/oi-remake-game) 复刻开发，并在其基础上持续维护和扩展新内容。
 
 原项目采用 **MIT 许可证**，版权归属 Little09qwq。
 
 本项目采用 **Apache-2.0 许可证**。
-
----
-
-> ⚠️ 本项目由 AI 辅助生成，欢迎提 Issue 和 PR！

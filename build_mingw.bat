@@ -27,7 +27,7 @@ if not exist "output" mkdir output
 
 echo [INFO] Compiling...
 
-set CXXFLAGS=-std=c++17 -O2 -mwindows -DUNICODE -D_UNICODE
+set CXXFLAGS=-std=c++17 -O2 -mwindows -DUNICODE -D_UNICODE -finput-charset=UTF-8 -fexec-charset=UTF-8
 set INCLUDES=-I"imgui" -I"imgui/backends"
 set SOURCES=main.cpp imgui/imgui.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp imgui/backends/imgui_impl_win32.cpp imgui/backends/imgui_impl_dx11.cpp
 set LIBS=-ld3d11 -ld3dcompiler -ldxgi -luser32 -lgdi32 -limm32 -ldwmapi
