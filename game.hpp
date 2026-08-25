@@ -123,6 +123,16 @@ inline void initGame() {
     gameState.efficiencyMultiplier = 1.0;
     gameState.moodCap = MOOD_LIMIT;
 
+    // v0.3.0 状态重置（专题 / 生活节奏）——所有单局状态必须在此清零
+    gameState.topicId = -1;           // Topics::INVALID
+    gameState.topicStartMonth = 0;
+    gameState.topicProgress = 0;
+    gameState.carefulChecks = 0;
+    gameState.masteredTopics.clear();
+    gameState.isAoYe = false;
+    gameState.sickNext = false;
+    gameState.exerciseCountThisMonth = 0;
+
     // 初始化遗忘追踪
     for (const auto& dim : KNOWLEDGE_DIMS) {
         gameState.lastStudyMonth[dim] = 1;

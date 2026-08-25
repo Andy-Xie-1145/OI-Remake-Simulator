@@ -18,6 +18,45 @@ void freshGame(const std::string& difficulty = "normal")
 
 } // namespace
 
+// ============================ 状态重置 ============================
+
+TEST_CASE("initGame - 重开时清理全部 v0.3.0 状态（回归：专题/熬夜/病倒残留）", "[reset]")
+{
+    Utils::setSeed(7);
+    freshGame();
+
+    // 模拟上一局结束时的残留状态
+    Topics::accept(2);                        // 字符串专题「进行中」
+    REQUIRE(Topics::active() != nullptr);
+    gameState.topicProgress = 3;
+    gameState.masteredTopics.insert(5);
+    gameState.carefulChecks = 4;
+    gameState.isAoYe = true;
+    gameState.sickNext = true;
+    gameState.exerciseCountThisMonth = 3;
+
+    // 「开始新游戏」路径：不经存档，BeginSetup -> initGame
+    Engine::hardReset();
+    initGame();
+    Engine::startNewGame();
+
+    CHECK(Topics::active() == nullptr);       // 专题已自动清理
+    CHECK(gameState.topicId == Topics::INVALID);
+    CHECK(gameState.topicStartMonth == 0);
+    CHECK(gameState.topicProgress == 0);
+    CHECK(gameState.masteredTopics.empty());  // 精通不跨局继承
+    CHECK(gameState.carefulChecks == 0);
+    CHECK_FALSE(gameState.isAoYe);
+    CHECK_FALSE(gameState.sickNext);
+    CHECK(gameState.exerciseCountThisMonth == 0);
+
+    // 新一局首个结算不得误判专题逾期扣心态
+    Engine::endMonthActions();
+    while (Engine::hasPhase()) Engine::phaseFinished();
+    for (const auto& f : gameState.settlementFacts)
+        CHECK(f.text.find("逾期") == std::string::npos);
+}
+
 // ============================ G · 存档系统 ============================
 
 TEST_CASE("save - 写入后读回，关键字段一致", "[save]")
