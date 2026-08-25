@@ -62,10 +62,10 @@ inline const TopicDef* active() {
     return gameState.topicId != INVALID ? byId(gameState.topicId) : nullptr;
 }
 
-// 接受专题（调用方保证当前无进行中的专题）
-inline void accept(int id) {
+// 接受专题；已精通或已有进行中专题时拒绝（返回 false）
+inline bool accept(int id) {
     const TopicDef* d = byId(id);
-    if (!d || active()) return;
+    if (!d || active() || hasMastery(id)) return false;
     gameState.topicId = id;
     gameState.topicStartMonth = gameState.currentMonth;
     gameState.topicProgress = (d->kind == Kind::Careful)
@@ -76,10 +76,21 @@ inline void accept(int id) {
         gameState.topicId = INVALID;
         logEvent(std::string("凭借过往的对拍积累，直接完成专题：") + d->name +
                  "！获得永久精通加成。", "event");
-        return;
+        return true;
     }
     logEvent(std::string("接受专题任务：") + d->name +
              "（" + std::to_string(MONTHS_LIMIT) + " 个月内完成）", "event");
+    return true;
+}
+
+// 精通奖励说明（供 UI 提示与完成通知使用）
+inline const char* RewardText(const TopicDef& d) {
+    switch (d.kind) {
+    case Kind::Knowledge: return "永久精通：比赛中该维度子问题的思考时间 -1";
+    case Kind::Speed:     return "永久精通：写代码阶段有效迅捷 +1";
+    case Kind::Careful:   return "永久精通：对拍/提交错误率 ×0.9";
+    }
+    return "";
 }
 
 inline void abandon() {

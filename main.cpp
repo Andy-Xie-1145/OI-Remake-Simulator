@@ -115,6 +115,64 @@ namespace
         std::string reason;
     };
 
+    // —— Toast 浮层：重要增益/事件在屏幕右上角短暂弹出（自动淡出）——
+    struct Toast
+    {
+        std::string title;
+        std::string sub;
+        ImVec4 accent;
+        float ttl;   // 剩余秒数
+    };
+    std::vector<Toast> g_toasts;
+
+    void PushToast(const std::string &title, const std::string &sub,
+                   const ImVec4 &accent, float ttl = 5.0f)
+    {
+        g_toasts.push_back({title, sub, accent, ttl});
+        if (g_toasts.size() > 6)   // 防堆积
+            g_toasts.erase(g_toasts.begin());
+    }
+
+    void DrawToasts()
+    {
+        if (g_toasts.empty()) return;
+        ImGuiIO &io = ImGui::GetIO();
+        ImDrawList *dl = ImGui::GetForegroundDrawList();
+        const float w = 330.0f;
+        const float x = io.DisplaySize.x - w - 18.0f;
+        float y = 58.0f;
+        for (auto it = g_toasts.begin(); it != g_toasts.end();)
+        {
+            it->ttl -= io.DeltaTime;
+            if (it->ttl <= 0.0f) { it = g_toasts.erase(it); continue; }
+            const float alpha = std::min(1.0f, it->ttl);
+            ImU32 bg = ImGui::ColorConvertFloat4ToU32(
+                ImVec4(OITheme::Col::Bg1.x, OITheme::Col::Bg1.y, OITheme::Col::Bg1.z, 0.94f * alpha));
+            ImU32 border = ImGui::ColorConvertFloat4ToU32(
+                ImVec4(OITheme::Col::Line2.x, OITheme::Col::Line2.y, OITheme::Col::Line2.z, alpha));
+            ImU32 bar = ImGui::ColorConvertFloat4ToU32(
+                ImVec4(it->accent.x, it->accent.y, it->accent.z, alpha));
+            ImFont *body = g_fontBody ? g_fontBody : ImGui::GetFont();
+            ImFont *small = g_fontSmall ? g_fontSmall : body;
+            const ImVec2 ts1 = body->CalcTextSizeA(body->LegacySize, FLT_MAX, 0.0f, it->title.c_str());
+            const ImVec2 ts2 = small->CalcTextSizeA(small->LegacySize, FLT_MAX, 0.0f, it->sub.c_str());
+            const float padX = 12.0f, padY = 9.0f;
+            const float h = padY * 2 + ts1.y + 3.0f + ts2.y;
+            const ImVec2 pmin(x, y), pmax(x + w, y + h);
+            dl->AddRectFilled(pmin, pmax, bg, 8.0f);
+            dl->AddRect(pmin, pmax, border, 8.0f);
+            dl->AddRectFilled(ImVec2(pmin.x, pmin.y + 4), ImVec2(pmin.x + 3, pmax.y - 4), bar, 2.0f);
+            dl->AddText(body, body->LegacySize, ImVec2(pmin.x + padX, pmin.y + padY),
+                        ImGui::ColorConvertFloat4ToU32(ImVec4(OITheme::Col::Txt.x, OITheme::Col::Txt.y, OITheme::Col::Txt.z, alpha)),
+                        it->title.c_str());
+            dl->AddText(small, small->LegacySize, ImVec2(pmin.x + padX, pmin.y + padY + ts1.y + 3.0f),
+                        ImGui::ColorConvertFloat4ToU32(ImVec4(OITheme::Col::TxtDim.x, OITheme::Col::TxtDim.y, OITheme::Col::TxtDim.z, alpha)),
+                        it->sub.c_str());
+            y += h + 8.0f;
+            ++it;
+        }
+    }
+
     void ResetSharedState()
     {
         gameState.playerStats = PlayerStats();
@@ -252,6 +310,15 @@ namespace
         bool confirmNewGame_ = false; // 防呆①：有存档时开新局需确认覆盖
         int savePeekYear_ = 1, savePeekCalMonth_ = 7, savePeekMonth_ = 1;
 
+        // —— Toast 快照：检测「引擎侧增益/事件」的新增，转成屏幕通知 ——
+        bool toastSnapValid_ = false;
+        size_t snapTraitCount_ = 0;
+        size_t snapAchCount_ = 0;
+        std::set<int> snapMastered_;
+        bool snapBaosong_ = false, snapAnxious_ = false, snapSick_ = false;
+        void SyncToastSnapshot();
+        void DiffToast();
+
         void ResetToHome();
         int TalentBudget() const;
         int TotalAllocated() const;
@@ -335,6 +402,7 @@ namespace
         gameOver_ = GameOverView();
         Engine::hardReset();
         gameInitialized_ = false;
+        toastSnapValid_ = false;
         helpReturnScreen_ = GuiScreen::Home;
     }
 
@@ -374,6 +442,7 @@ namespace
         // 进入月回合
         Engine::startNewGame();
         SyncFromEngine();
+        SyncToastSnapshot();   // 新局起点，不把旧局状态误报为新增
     }
 
     void GuiApp::OpenHelp()
@@ -412,6 +481,72 @@ namespace
         screen_ = GuiScreen::MonthAction;
         // 存档点：进入新月（或月中回到行动阶段）时自动落盘
         Save::write();
+    }
+
+    // ---- Toast 快照：把引擎侧状态变化翻译成屏幕通知（不侵入游戏逻辑）----
+    void GuiApp::SyncToastSnapshot()
+    {
+        snapTraitCount_ = gameState.traits.size();
+        snapAchCount_ = gameState.playerStats.achievements.size();
+        snapMastered_ = gameState.masteredTopics;
+        snapBaosong_ = gameState.playerStats.isBaosong;
+        snapAnxious_ = gameState.isAnxious;
+        snapSick_ = gameState.sickNext;
+        toastSnapValid_ = true;
+    }
+
+    void GuiApp::DiffToast()
+    {
+        if (!gameInitialized_) { toastSnapValid_ = false; return; }
+        if (!toastSnapValid_) { SyncToastSnapshot(); return; }
+
+        const auto &ps = gameState.playerStats;
+
+        // 新特质
+        if (gameState.traits.size() > snapTraitCount_)
+        {
+            for (size_t i = snapTraitCount_; i < gameState.traits.size(); ++i)
+                for (const auto &t : Talent::ACQUIRABLE_TRAITS)
+                    if (t.id == gameState.traits[i])
+                        PushToast(std::string("获得特质 · ") + t.name, t.desc,
+                                  OITheme::Col::Ok);
+            snapTraitCount_ = gameState.traits.size();
+        }
+
+        // 专题完成（新增精通）
+        for (int id : gameState.masteredTopics)
+            if (!snapMastered_.count(id))
+            {
+                const Topics::TopicDef *d = Topics::byId(id);
+                if (d) PushToast(std::string("专题完成 · ") + d->name,
+                                 Topics::RewardText(*d), OITheme::Col::Teal, 6.0f);
+            }
+        snapMastered_ = gameState.masteredTopics;
+
+        // 保送锁定
+        if (ps.isBaosong && !snapBaosong_)
+            PushToast("保送锁定！", "文化课压力解除 · 高三 6 月变为庆功月",
+                      OITheme::Col::LgYellow, 7.0f);
+
+        // 焦虑发作
+        if (gameState.isAnxious && !snapAnxious_)
+            PushToast("焦虑发作", "连续心态低迷 · 学习效率 ×0.7", OITheme::Col::Bad);
+
+        // 病倒
+        if (gameState.sickNext && !snapSick_)
+            PushToast("病倒了", "下月行动力 -2 · 心态 -1（只能静养）", OITheme::Col::Bad);
+
+        // 新成就
+        if (ps.achievements.size() > snapAchCount_)
+        {
+            for (size_t i = snapAchCount_; i < ps.achievements.size(); ++i)
+                PushToast("成就达成", ps.achievements[i], OITheme::Col::LgYellow, 6.0f);
+            snapAchCount_ = ps.achievements.size();
+        }
+
+        snapBaosong_ = ps.isBaosong;
+        snapAnxious_ = gameState.isAnxious;
+        snapSick_ = gameState.sickNext;
     }
 
     void GuiApp::FinalizeContest()
@@ -482,6 +617,8 @@ namespace
 
     void GuiApp::Render()
     {
+        DiffToast();   // 检测引擎侧新增增益/事件 → 生成屏幕通知
+
         ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
         ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
         ImGui::Begin("OI 主窗口", nullptr,
@@ -553,6 +690,8 @@ namespace
         }
 
         ImGui::End();
+
+        if (gameInitialized_) DrawToasts();   // Toast 浮层最后绘制（覆盖在最上层）
     }
 
     void GuiApp::RenderTopBar()
@@ -672,6 +811,8 @@ namespace
                 ImGui::Spacing();
                 if (OIWidgets::PrimaryButton("仍然开始新游戏", ImVec2(200, kPrimaryButtonHeight)))
                 {
+                    // 已确认放弃旧档：立即删除，避免之后反复覆盖写入把存档搞坏
+                    Save::erase();
                     confirmNewGame_ = false;
                     ImGui::CloseCurrentPopup();
                     screen_ = GuiScreen::Difficulty;
@@ -697,6 +838,7 @@ namespace
                 {
                     gameInitialized_ = true;
                     SyncFromEngine();
+                    SyncToastSnapshot();   // 读档起点，避免整屏历史通知轰炸
                 }
                 else
                 {
@@ -1077,19 +1219,36 @@ namespace
             else
             {
                 ImGui::AlignTextToFramePadding();
-                ImGui::TextColored(OITheme::Col::TxtFaint, "专题任务（完成得永久精通加成）：");
+                ImGui::TextColored(OITheme::Col::TxtFaint, "专题任务（3 个月内完成 4 次匹配行动 → 永久精通）：");
+                const bool busy = (Topics::active() != nullptr);
                 bool anyBtn = false;
-                for (const auto& t : Topics::ALL)
+                for (const auto &t : Topics::ALL)
                 {
                     if (Topics::hasMastery(t.id)) continue;
                     if (anyBtn) ImGui::SameLine(0, 6);
+                    ImGui::BeginDisabled(busy);
                     ImGui::PushID(t.id);
                     if (ImGui::Button(t.name, ImVec2(0, 24))) Topics::accept(t.id);
-                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", t.desc);
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("%s\n奖励：%s%s", t.desc, Topics::RewardText(t),
+                                          busy ? "\n（已有进行中的专题）" : "");
                     ImGui::PopID();
+                    ImGui::EndDisabled();
                     anyBtn = true;
                 }
                 if (!anyBtn) ImGui::TextColored(OITheme::Col::Ok, "全部专题均已精通！");
+                if (!gameState.masteredTopics.empty())
+                {
+                    ImGui::Spacing();
+                    ImGui::AlignTextToFramePadding();
+                    ImGui::TextColored(OITheme::Col::TxtFaint, "已精通：");
+                    for (int id : gameState.masteredTopics)
+                        if (const Topics::TopicDef *d = Topics::byId(id))
+                        {
+                            ImGui::SameLine(0, 4);
+                            OIWidgets::Tag(d->name, OITheme::Col::Ok);
+                        }
+                }
             }
         }
         OIWidgets::EndCard();

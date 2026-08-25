@@ -1,6 +1,7 @@
 #include "catch.hpp"
 #include "../month_engine.hpp"
 #include "../save_system.hpp"
+#include <cstring>
 
 // —— v0.3.0 新功能：G 存档 / C 结局矩阵 / D 专题 / E 生活节奏 ——
 
@@ -17,6 +18,22 @@ void freshGame(const std::string& difficulty = "normal")
 }
 
 } // namespace
+
+TEST_CASE("topic - 已精通的专题不可再次接受（防重复刷取）", "[topics]")
+{
+    Utils::setSeed(7);
+    freshGame();
+    CHECK(Topics::accept(0));                 // 首次接受成功
+    gameState.masteredTopics.insert(0);       // 模拟已完成
+    gameState.topicId = Topics::INVALID;
+
+    CHECK_FALSE(Topics::accept(0));           // 接口层拒绝（不依赖 UI 过滤）
+    CHECK(Topics::active() == nullptr);
+
+    // 奖励说明文案非空（UI 提示与完成通知共用）
+    for (const auto& t : Topics::ALL)
+        CHECK(std::strlen(Topics::RewardText(t)) > 0);
+}
 
 // ============================ 状态重置 ============================
 
