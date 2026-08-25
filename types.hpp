@@ -8,8 +8,9 @@
 #include <random>
 #include <map>
 
-// ========== 核心常量（完全复制原版） ==========
-inline const int MOOD_LIMIT = 12;  // 心态上限
+// ========== 核心常量 ==========
+// MOOD_LIMIT 仅为 moodCap 的默认值；运行期心态上限的唯一真相是 gameState.moodCap
+inline const int MOOD_LIMIT = 12;
 
 // ========== 玩家属性结构（完全复制原版playerStats） ==========
 struct PlayerStats {
@@ -35,9 +36,6 @@ struct PlayerStats {
     int culture = 0;         // 文化课
     int luck = 0;            // 运气：减少负面事件发生率 (0-20)
 
-    // 核心属性
-    int determination = 500; // 决心（保留兼容，v2 不再使用）
-
     // 比赛成绩
     int cspScore = 0;
     int noipScore = 0;
@@ -56,6 +54,7 @@ struct PlayerStats {
     bool isCandidateTeam = false;
     bool isNationalTeam = false;
     bool isIOIgold = false;
+    bool isBaosong = false;      // 保送锁定（入选国家集训队，结局矩阵）
 
     // 其他
     int extraMoodDrop = 0;
@@ -136,13 +135,12 @@ inline const std::map<int, ContestConfig> CONTEST_CONFIGS = {
     {34, {"NOI+练习",         {{9,10}}, 10, false}}
 };
 
-// ========== 难度设置（完全复制原版） ==========
+// ========== 难度设置 ==========
 struct DifficultySettings {
     int talentPoints;
-    int initialDetermination;
     double scoreMultiplier;
     std::string name;
-    // v2 新增
+    // v2
     int initialMoney = 300;
     int initialHealth = 15;
     int apBonus = 0;           // 每月额外 AP
@@ -152,10 +150,10 @@ struct DifficultySettings {
 };
 
 inline const std::map<std::string, DifficultySettings> DIFFICULTY_SETTINGS = {
-    {"easy",   {30, 3000, 0.8, "简单", 500, 18, 1, 150, 0.7, 0.7}},
-    {"normal", {20, 1500, 0.9, "普通", 300, 15, 0, 100, 1.0, 1.0}},
-    {"hard",   {15, 500,  1.0, "困难", 150, 13, -1, 70,  1.3, 1.3}},
-    {"expert", {15, 0,    1.1, "专家", 50,  10, -1, 40,  1.5, 1.5}}
+    {"easy",   {30, 0.8, "简单", 500, 18, 1, 150, 0.7, 0.7}},
+    {"normal", {20, 0.9, "普通", 300, 15, 0, 100, 1.0, 1.0}},
+    {"hard",   {15, 1.0, "困难", 150, 13, -1, 70,  1.3, 1.3}},
+    {"expert", {15, 1.1, "专家", 50,  10, -1, 40,  1.5, 1.5}}
 };
 
 // ========== 商店价格（金钱驱动，v2） ==========
@@ -247,6 +245,9 @@ inline std::mt19937 gen(rd());
 
 // ========== 工具函数 ==========
 namespace Utils {
+    // 测试用：固定随机种子以获得可复现的模拟序列
+    inline void setSeed(unsigned int seed) { gen.seed(seed); }
+
     inline int randomInt(int min, int max) {
         std::uniform_int_distribution<int> dis(min, max);
         return dis(gen);
@@ -312,6 +313,14 @@ struct PendingContestNotice {
     std::string effectText;
 };
 
+// ========== 月度结算事实（类型化，供结算页直接分组） ==========
+
+struct SettlementFact {
+    enum class Cat { Health, Knowledge, Economy, Other };
+    Cat cat = Cat::Other;
+    std::string text;   // 人类可读文案（仅用于展示）
+};
+
 // ========== 游戏全局状态 ==========
 
 struct GameState {
@@ -327,8 +336,6 @@ struct GameState {
     std::vector<std::vector<SubProblem>> subProblems;
     std::vector<std::vector<ContestSubProblemState>> contestStates;
     std::vector<std::string> lastActions;
-    int currentPhase = 1;
-    int totalTrainingEvents = 5;
     std::map<std::string, int> currentShopPrices;
     std::vector<std::string> gameLog;
     PendingContestNotice pendingContestNotice;
@@ -343,6 +350,16 @@ struct GameState {
     int health = 15;            // 0-20，归零=游戏结束
     int money = 0;              // 货币
     bool isTingke = false;      // 停课状态（10 AP, 心态-3, 禁文化课）
+    bool isAoYe = false;        // 熬夜状态（+2 AP, 结算健康-3, 焦虑×1.3；与停课互斥）
+    bool sickNext = false;      // 病倒：下月行动力-2、心态-1（惩罚不可清除）
+    int exerciseCountThisMonth = 0;  // 本月锻炼次数（≥2 → 病倒概率减半）
+
+    // 专题任务（同时最多 1 个；topicId 为 Topics::INVALID 表示无）
+    int topicId = -1;
+    int topicStartMonth = 0;
+    int topicProgress = 0;
+    int carefulChecks = 0;      // 累计成功对拍次数（细心专题进度用）
+    std::set<int> masteredTopics;   // 已获「精通」的专题 id
     std::map<std::string, int> lastStudyMonth;  // 遗忘追踪：维度→上次学习的月份
     std::vector<std::string> traits;            // 已获得特质
     std::string background;                     // 已选背景 ID
@@ -350,7 +367,7 @@ struct GameState {
     double cultureEfficiency = 1.0;             // 文化课效率乘数（跨年加权）
 
     // 月度结算临时数据
-    std::vector<std::string> settlementLogs;    // 本月结算日志
+    std::vector<SettlementFact> settlementFacts;  // 本月结算事实（类型化）
 
     // 考试分数追踪
     struct ExamRecord {
@@ -436,27 +453,6 @@ inline const char* getLuoguTierName(int level) {
     return "NOI/NOI+/CTSC";
 }
 
-// ========== 题目随机名字生成 ==========
-
-inline std::string generateProblemName() {
-    static const char* prefixes[] = {
-        "小", "大", "超级", "神秘", "终极", "经典", "隐藏", "传奇", "终极"
-    };
-    static const char* subjects[] = {
-        "猴子", "数列", "树", "图", "路径", "矩阵", "字符串", "方块",
-        "宝石", "迷宫", "城堡", "王国", "花园", "宝藏", "密码", "信号",
-        "桥梁", "铁路", "商店", "比赛", "任务", "游戏", "排队", "分糖"
-    };
-    static const char* suffixes[] = {
-        "", "问题", "的烦恼", "的冒险", "之谜", "大作战", "的旅程",
-        "的挑战", "复兴", "变换", "计数", "排序", "构造"
-    };
-    std::string name = prefixes[Utils::randomInt(0, 8)];
-    name += subjects[Utils::randomInt(0, 23)];
-    name += suffixes[Utils::randomInt(0, 12)];
-    return name;
-}
-
 // ========== 自定义比赛难度模板 ==========
 
 struct ContestTemplate {
@@ -476,5 +472,15 @@ inline const std::vector<ContestTemplate> CONTEST_TEMPLATES = {
     {"IOI 难度",     6, {{7,8}, {7,9}, {8,9}, {8,10}, {9,10}, {10,10}}, 30, true, 4},
     {"CTSC 难度",    8, {{8,9}, {8,9}, {9,10}, {9,10}, {9,10}, {9,10}, {10,10}, {10,10}}, 36, true, 4},
 };
+
+// 自定义模板 → 比赛配置的唯一 adapter（所有比赛入口共用 Contest::start(config)）
+inline ContestConfig contestConfigFromTemplate(const ContestTemplate& t) {
+    ContestConfig c;
+    c.name = t.name;
+    c.problemRanges = t.ranges;
+    c.timePoints = t.timePoints;
+    c.isIOI = t.isIOI;
+    return c;
+}
 
 #endif // TYPES_HPP

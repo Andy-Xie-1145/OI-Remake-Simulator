@@ -78,6 +78,13 @@ inline MonthInfo getMonthInfo(int month) {
         break;
     }
 
+    // 保送锁定：高三 6 月高考替换为「庆功月」（无考试、不扣 AP）
+    if (info.isGaokao && gameState.playerStats.isBaosong) {
+        info.hasExam = false;
+        info.isGaokao = false;
+        info.apDeduction = 0;
+    }
+
     // 资格赛没过 → 恢复 AP（不扣）
     if (info.contestIds.empty() && info.apDeduction > 0 && !info.hasExam) {
         info.apDeduction = 0;
@@ -93,14 +100,25 @@ inline void startMonth(int month) {
     gameState.currentYear = monthToYear(month);
     gameState.calendarMonth = cm;
 
-    // 基础 AP
-    int baseAp = gameState.isTingke ? 10 : 8;
+    // 基础 AP：8 + 停课2 + 熬夜2 + 难度加成（与 Engine::recomputeApBudget 同式）
+    int baseAp = 8;
+    if (gameState.isTingke) baseAp += 2;
+    if (gameState.isAoYe) baseAp += 2;
     baseAp += settings.apBonus;
 
     // 停课扣心态
     if (gameState.isTingke) {
-        gameState.mood = std::max(0, gameState.mood - 3);
+        applyStatDelta("mood", -3, "停课");
     }
+
+    // 病倒静养：本月行动力 -2、心态 -1（一次性消费，不可清除）
+    if (gameState.sickNext) {
+        baseAp -= 2;
+        applyStatDelta("mood", -1, "病后静养");
+        logEvent("大病初愈，这个月状态不佳（AP-2，心态-1）", "event");
+        gameState.sickNext = false;
+    }
+    gameState.exerciseCountThisMonth = 0;  // 新月锻炼计数重置
 
     // 比赛/考试月扣 AP
     MonthInfo info = getMonthInfo(month);
@@ -108,14 +126,10 @@ inline void startMonth(int month) {
 
     gameState.ap = std::max(0, baseAp);
     gameState.maxAp = baseAp; // 记录原始值用于结算
-    gameState.settlementLogs.clear();
+    gameState.settlementFacts.clear();
 }
 
 // endMonth 在 game.hpp 中实现（需要遗忘/金钱等逻辑）
-
-inline bool isGameOver() {
-    return gameState.health <= 0 || gameState.currentMonth > 36;
-}
 
 } // namespace Calendar
 

@@ -137,18 +137,11 @@ inline bool tryAcquireTrait(double baseProb) {
         int dim = Utils::randomInt(0, static_cast<int>(KNOWLEDGE_DIMS.size()) - 1);
         applyStatDelta(KNOWLEDGE_DIMS[dim], 1, "特质：快速学习");
     }
-    // contest_beast 和 iron_will 在比赛/焦虑逻辑中检查
 
+    // contest_beast 在 Contest::start 生效；iron_will 在 getStudyEfficiency 生效
+    // （效果判定统一走 playerHasTrait）
     logEvent("获得特质：" + std::string(trait.name) + " — " + trait.desc, "event");
     return true;
-}
-
-// 查询是否拥有某特质
-inline bool hasTrait(const std::string& traitId) {
-    for (const auto& t : gameState.traits) {
-        if (t == traitId) return true;
-    }
-    return false;
 }
 
 } // namespace Talent

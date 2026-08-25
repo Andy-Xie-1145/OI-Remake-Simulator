@@ -8,14 +8,34 @@
 
 namespace Activity {
 
-enum Type { Learn, MockContest, CustomContest, Practice, StudyCulture, Rest, SummerCamp };
+enum Type { Learn, MockContest, CustomContest, Practice, StudyCulture, Rest, SummerCamp, Exercise };
 
 struct ActivityDef {
     Type type;
     const char* name;
-    int apCost;
+    int apCost;   // 行动力消耗（唯一真相：引擎扣费与 UI 展示都读这里）
+    int hpCost;   // 健康消耗
     const char* desc;
 };
+
+// 各活动成本唯一真相表
+inline const std::vector<ActivityDef> ACTIVITY_DEFS = {
+    {Learn,         "学习知识",     2, 1, "选择一个知识方向进行学习"},
+    {MockContest,   "打网赛",       3, 1, "参加真实网赛（完整比赛流程）"},
+    {CustomContest, "自定义模拟赛", 4, 2, "自选难度+知识点"},
+    {Practice,      "刷题练习",     2, 1, "按难度刷一道题（完整比赛流程）"},
+    {StudyCulture,  "学文化课",     2, 1, "文化课+2, 心态+1"},
+    {Rest,          "休息",         2, 1, "健康+3, 心态+2"},
+    {SummerCamp,    "参加集训",     4, 0, "高强度训练，知识+2，健康-2，心态-1"},
+    {Exercise,      "体育锻炼",     1, 0, "健康+2；本月锻炼≥2次 → 病倒概率减半"},
+};
+
+inline const ActivityDef& defOf(Type t) {
+    for (const auto& d : ACTIVITY_DEFS)
+        if (d.type == t) return d;
+    static const ActivityDef fallback{Rest, "?", 0, 0, ""};
+    return fallback;
+}
 
 // 网赛选项
 struct MockContestOption {
@@ -53,23 +73,18 @@ inline const std::vector<PracticeOption> PRACTICE_OPTIONS = {
 };
 
 inline std::vector<ActivityDef> getAvailable() {
-    std::vector<ActivityDef> list = {
-        {Learn,         "学习知识",     2, "选择一个知识方向进行学习"},
-        {MockContest,   "打网赛",       3, "参加真实网赛（完整比赛流程）"},
-        {CustomContest, "自定义模拟赛", 4, "自选难度+知识点，消耗 4 AP"},
-        {Practice,      "刷题练习",     2, "按难度刷一道题（完整比赛流程）"},
-        {StudyCulture,  "学文化课",     2, "文化课+2, 心态+1"},
-        {Rest,          "休息",         2, "健康+3, 心态+2"},
-    };
-    if (gameState.isTingke) {
-        list.erase(std::remove_if(list.begin(), list.end(),
-            [](const ActivityDef& a) { return a.type == StudyCulture; }),
-            list.end());
+    std::vector<ActivityDef> list;
+    for (const auto& d : ACTIVITY_DEFS) {
+        if (d.type == CustomContest) continue;  // 自定义赛走独立 Tab，不进底部按钮列表
+        if (d.type == StudyCulture && gameState.isTingke) continue;  // 停课禁文化课
+        list.push_back(d);
     }
     // 暑假集训（7-8月，非高三）
     int cm = gameState.calendarMonth;
-    if ((cm == 7 || cm == 8) && gameState.currentYear <= 2) {
-        list.push_back({SummerCamp, "参加集训", 4, "高强度训练，知识+2，健康-2，心态-1"});
+    if (!((cm == 7 || cm == 8) && gameState.currentYear <= 2)) {
+        list.erase(std::remove_if(list.begin(), list.end(),
+            [](const ActivityDef& a) { return a.type == SummerCamp; }),
+            list.end());
     }
     return list;
 }
@@ -199,6 +214,12 @@ inline ActivityResult execute(Type type, int param = 0) {
         result.logs.push_back("健康 -2, 心态 -1（高强度集训）");
         // 经验积累
         addTempExperience(2, "集训经验");
+        break;
+    }
+
+    case Exercise: {
+        applyStatDelta("health", 2, "体育锻炼");
+        result.logs.push_back("健康 +2（出一身汗，神清气爽）");
         break;
     }
     }

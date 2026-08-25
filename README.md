@@ -1,4 +1,4 @@
-# OI 重开模拟器 v0.2.0
+# OI 重开模拟器 v0.3.0
 
 > 人生重开模拟器的 OI 竞赛版本 —— 36 月回合制，体验一名 OIer 的完整高中生涯
 
@@ -18,8 +18,12 @@
 - **暑假集训**：7-8 月高强度训练选项
 - **115 道题目**：覆盖入门到 NOI+ 全级别
 - **4 档难度**：简单 / 普通 / 困难 / 专家
+- **存档系统**（v0.3.0）：月翻页自动存档，主菜单一键继续
+- **专题任务**（v0.3.0）：11 个专题，完成得永久「精通」加成
+- **生活节奏**（v0.3.0）：体育锻炼、熬夜冲刺、病倒静养
+- **保送与结局矩阵**（v0.3.0）：集训队锁定保送；OI 高度 × 高考档位 = 8 种结局称号 + 三年大事记
 
-> 详细更新说明见 [`docs/v0.2.0-changelog.md`](docs/v0.2.0-changelog.md)
+> 详细更新说明见 [`docs/v0.3.0-changelog.md`](docs/v0.3.0-changelog.md)
 
 ## 获取源码
 
@@ -73,7 +77,11 @@ cmake --build . --config Release
 
 | 文件 | 说明 |
 |------|------|
-| `main.cpp` | 主程序入口、UI 渲染 |
+| `main.cpp` | 主程序入口、UI 渲染（纯视图） |
+| `month_engine.hpp` | 月度引擎（回合流程、活动成本、商店交易的唯一规则归属地） |
+| `save_system.hpp` | 存档系统（key-value 序列化，自动/手动存读档） |
+| `topics.hpp` | 专题任务系统（进度 / 精通 / 逾期） |
+| `ending.hpp` | 结局矩阵（OI 高度 × 高考档位 → 结局称号与结语） |
 | `types.hpp` | 类型定义、常量、难度配置 |
 | `game.hpp` | 游戏逻辑（月度结算、焦虑、遗忘、经验） |
 | `story.hpp` | 月历引擎（36 月时间线、比赛/考试安排） |
@@ -81,10 +89,11 @@ cmake --build . --config Release
 | `talents.hpp` | 背景系统 + 特质获取 |
 | `culture_exam.hpp` | 文化课考试系统 |
 | `contest.hpp` | 比赛逻辑（思考/写代码/对拍/评奖） |
-| `events.hpp` | 事件系统 + 商店 |
+| `events.hpp` | 属性变更唯一入口 + 商店 |
 | `problem_pool.hpp` | 题目池 (115 题) |
-| `training_events_data.hpp` | 训练事件数据 |
 | `imgui/` | Dear ImGui（Git 子模块） |
+
+自动化测试位于 [`tests/`](tests/)（Catch2，含引擎级无头回归测试），运行 `tests/build_test_mingw.bat` 一键编译执行。领域术语见 [`CONTEXT.md`](CONTEXT.md)，架构决策见 [`docs/adr/`](docs/adr/)。
 
 ## 技术栈
 

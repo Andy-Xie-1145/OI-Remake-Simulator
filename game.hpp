@@ -89,54 +89,9 @@ inline bool isTopAwardForExperience(const std::string& contestType, const std::s
     return false;
 }
 
-// ========== 获取训练事件类型 ==========
-
-inline std::string getTrainingEventType(int currentEvent, int /*totalEvents*/) {
-    struct EventEntry
-    {
-        std::string fixed;
-        bool isRandom;
-    };
-
-    using EventSeq = std::vector<EventEntry>;
-    static const std::vector<int> phases_5events = {19, 31, 38};
-    static const std::vector<int> phases_4events = {3, 5, 7, 11, 13, 26, 29, 35, 50};
-    static const std::vector<int> phases_2events = {9, 15, 21, 33, 40, 45};
-    static const std::vector<int> phases_6events = {42, 53};
-
-    static const EventSeq seq_phase1 = {
-        {"长期训练", false}, {"", true}, {"娱乐时间", false}, {"", true}, {"赛前一天", false}};
-    static const EventSeq seq_phase17 = {
-        {"步入高二", false}, {"长期训练", false}, {"", true}, {"", true},
-        {"娱乐时间", false}, {"", true}, {"焦虑", false}, {"赛前一天", false}};
-    static const EventSeq seq_5events = {
-        {"", true}, {"娱乐时间", false}, {"焦虑", false}, {"遗忘", false}, {"赛前一天", false}};
-    static const EventSeq seq_4events = {
-        {"", true}, {"娱乐时间", false}, {"焦虑", false}, {"赛前一天", false}};
-    static const EventSeq seq_2events = {
-        {"焦虑", false}, {"赛前一天", false}};
-    static const EventSeq seq_6events = {
-        {"", true}, {"娱乐时间", false}, {"", true}, {"娱乐时间", false}, {"焦虑", false}, {"赛前一天", false}};
-
-    const EventSeq* seq = nullptr;
-    if (gameState.currentPhase == 1) seq = &seq_phase1;
-    else if (gameState.currentPhase == 17) seq = &seq_phase17;
-    else if (std::find(phases_5events.begin(), phases_5events.end(), gameState.currentPhase) != phases_5events.end()) seq = &seq_5events;
-    else if (std::find(phases_4events.begin(), phases_4events.end(), gameState.currentPhase) != phases_4events.end()) seq = &seq_4events;
-    else if (std::find(phases_2events.begin(), phases_2events.end(), gameState.currentPhase) != phases_2events.end()) seq = &seq_2events;
-    else if (std::find(phases_6events.begin(), phases_6events.end(), gameState.currentPhase) != phases_6events.end()) seq = &seq_6events;
-
-    if (seq != nullptr && currentEvent >= 1 && currentEvent <= static_cast<int>(seq->size()))
-    {
-        const auto& entry = (*seq)[currentEvent - 1];
-        if (entry.isRandom)
-        {
-            return Utils::randomBool(0.5) ? "提升训练" : "比赛训练";
-        }
-        return entry.fixed;
-    }
-
-    return "提升训练";
+// 查询玩家是否拥有某特质（特质效果判定统一走这里）
+inline bool playerHasTrait(const std::string& traitId) {
+    return std::find(gameState.traits.begin(), gameState.traits.end(), traitId) != gameState.traits.end();
 }
 
 // ========== 游戏初始化 ==========
@@ -144,7 +99,6 @@ inline std::string getTrainingEventType(int currentEvent, int /*totalEvents*/) {
 inline void initGame() {
     initProblemPool();
     auto settings = DIFFICULTY_SETTINGS.at(gameState.gameDifficulty);
-    gameState.playerStats.determination = settings.initialDetermination;
     gameState.playerStats.extraMoodDrop = (gameState.gameDifficulty == "expert") ? 2 : (gameState.gameDifficulty == "easy") ? 0 : 1;
     gameState.currentShopPrices = INITIAL_SHOP_PRICES.at(gameState.gameDifficulty);
 
@@ -161,7 +115,7 @@ inline void initGame() {
     gameState.traits.clear();
     gameState.background.clear();
     gameState.ownedItems.clear();
-    gameState.settlementLogs.clear();
+    gameState.settlementFacts.clear();
     gameState.examRecords.clear();
     gameState.anxietyMonths = 0;
     gameState.isAnxious = false;
@@ -177,7 +131,6 @@ inline void initGame() {
 }
 
 // ========== v2 心态效率 ==========
-
 inline double getMoodEfficiency() {
     return std::max(0.5, std::min(1.5, gameState.mood / 6.0));
 }
@@ -210,9 +163,12 @@ inline int calculateMonthlyIncome() {
     return income;
 }
 
-// 月度结算主函数
+// 月度结算主函数：每月恰好调用一次（由 MonthEngine 驱动）
 inline void settleMonth(bool hasContest) {
-    gameState.settlementLogs.clear();
+    gameState.settlementFacts.clear();
+    auto fact = [](SettlementFact::Cat cat, const std::string& text) {
+        gameState.settlementFacts.push_back({cat, text});
+    };
 
     // 1. 未用 AP -> 睡觉
     int unusedAp = gameState.ap;
@@ -220,8 +176,9 @@ inline void settleMonth(bool hasContest) {
         int healthGain = unusedAp;
         int moodGain = unusedAp / 2;
         gameState.health = std::min(20, gameState.health + healthGain);
-        gameState.mood = std::min(gameState.moodCap, gameState.mood + moodGain);
-        gameState.settlementLogs.push_back("未用 " + std::to_string(unusedAp) +
+        applyStatDelta("mood", moodGain, "月末睡觉");
+        fact(SettlementFact::Cat::Health,
+            "未用 " + std::to_string(unusedAp) +
             " AP -> 睡觉恢复（健康+" + std::to_string(healthGain) +
             ", 心态+" + std::to_string(moodGain) + "）");
     }
@@ -230,26 +187,26 @@ inline void settleMonth(bool hasContest) {
     int oldHealth = gameState.health;
     gameState.health = std::min(20, gameState.health + 2);
     if (gameState.health > oldHealth) {
-        gameState.settlementLogs.push_back("健康自然恢复 +" +
-            std::to_string(gameState.health - oldHealth));
+        fact(SettlementFact::Cat::Health,
+            "健康自然恢复 +" + std::to_string(gameState.health - oldHealth));
     }
 
     // 3. 月度心态变化
     int moodDelta = 0;
 
-    // 文化影响
-    if (gameState.playerStats.culture >= 12) { moodDelta += 1; gameState.settlementLogs.push_back("文化课扎实：心态+1"); }
-    else if (gameState.playerStats.culture < 6) { moodDelta -= 1; gameState.settlementLogs.push_back("文化课薄弱：心态-1"); }
+    // 文化影响（保送后文化课压力免除）
+    if (gameState.playerStats.culture >= 12) { moodDelta += 1; fact(SettlementFact::Cat::Health, "文化课扎实：心态+1"); }
+    else if (gameState.playerStats.culture < 6 && !gameState.playerStats.isBaosong) { moodDelta -= 1; fact(SettlementFact::Cat::Health, "文化课薄弱：心态-1"); }
 
     // OI 短板影响
     int minKnow = getMinKnowledge();
-    if (minKnow >= 8) { moodDelta += 1; gameState.settlementLogs.push_back("OI 各科均衡：心态+1"); }
-    else if (minKnow < 4) { moodDelta -= 1; gameState.settlementLogs.push_back("OI 有明显短板：心态-1"); }
+    if (minKnow >= 8) { moodDelta += 1; fact(SettlementFact::Cat::Health, "OI 各科均衡：心态+1"); }
+    else if (minKnow < 4) { moodDelta -= 1; fact(SettlementFact::Cat::Health, "OI 有明显短板：心态-1"); }
 
     // 比赛月压力
-    if (hasContest) { moodDelta -= 1; gameState.settlementLogs.push_back("比赛月压力：心态-1"); }
+    if (hasContest) { moodDelta -= 1; fact(SettlementFact::Cat::Health, "比赛月压力：心态-1"); }
 
-    gameState.mood = std::max(0, std::min(gameState.moodCap, gameState.mood + moodDelta));
+    applyStatDelta("mood", moodDelta, "月度结算");
 
     // 4. 遗忘
     int forgetThreshold = 2;
@@ -263,54 +220,74 @@ inline void settleMonth(bool hasContest) {
                     int& val = gameState.playerStats.*(statIt->second);
                     if (val > 0) {
                         val = std::max(0, val - 1);
-                        gameState.settlementLogs.push_back(Utils::getStatName(dim) + " 遗忘 -1（" +
+                        fact(SettlementFact::Cat::Knowledge,
+                            Utils::getStatName(dim) + " 遗忘 -1（" +
                             std::to_string(monthsSince) + "个月未学）");
                     }
                 }
             }
         }
     }
-    // 文化遗忘
+    // 文化遗忘（保送后不再遗忘）
     auto cultureIt = gameState.lastStudyMonth.find("culture");
-    if (cultureIt != gameState.lastStudyMonth.end()) {
+    if (cultureIt != gameState.lastStudyMonth.end() && !gameState.playerStats.isBaosong) {
         int monthsSince = gameState.currentMonth - cultureIt->second;
         if (monthsSince >= forgetThreshold && gameState.playerStats.culture > 0) {
             gameState.playerStats.culture = std::max(0, gameState.playerStats.culture - 1);
-            gameState.settlementLogs.push_back("文化课遗忘 -1（" + std::to_string(monthsSince) + "个月未学）");
+            fact(SettlementFact::Cat::Knowledge,
+                "文化课遗忘 -1（" + std::to_string(monthsSince) + "个月未学）");
         }
     }
 
     // 5. 金钱收入
     int income = calculateMonthlyIncome();
     gameState.money += income;
-    gameState.settlementLogs.push_back("零花钱 +" + std::to_string(income));
+    fact(SettlementFact::Cat::Economy, "零花钱 +" + std::to_string(income));
 
-    // 6. 焦虑检查
+    // 6. 焦虑检查（熬夜放大焦虑概率）
+    const double aoYeMult = gameState.isAoYe ? 1.3 : 1.0;
     if (gameState.mood < 4) {
         gameState.anxietyMonths++;
         if (gameState.anxietyMonths >= 2 && !gameState.isAnxious) {
             double anxietyProb = 0.3 * DIFFICULTY_SETTINGS.at(gameState.gameDifficulty).anxietyMultiplier;
             anxietyProb *= gameState.anxietyMultiplier;
+            anxietyProb *= aoYeMult;
             if (Utils::randomBool(anxietyProb)) {
                 gameState.isAnxious = true;
-                gameState.mood = std::max(0, gameState.mood - 2);
-                gameState.settlementLogs.push_back("焦虑发作！心态 -2（连续低心态）");
+                applyStatDelta("mood", -2, "焦虑发作");
+                fact(SettlementFact::Cat::Health, "焦虑发作！心态 -2（连续低心态）");
             }
         }
         if (gameState.isAnxious) {
-            gameState.settlementLogs.push_back("焦虑状态中，效率降低");
+            fact(SettlementFact::Cat::Health, "焦虑状态中，效率降低");
         }
     } else {
         if (gameState.isAnxious) {
-            gameState.settlementLogs.push_back("心态恢复，焦虑缓解");
+            fact(SettlementFact::Cat::Health, "心态恢复，焦虑缓解");
         }
         gameState.isAnxious = false;
         gameState.anxietyMonths = 0;
     }
 
+    // 6.5 熬夜的健康代价
+    if (gameState.isAoYe) {
+        applyStatDelta("health", -3, "熬夜冲刺");
+        fact(SettlementFact::Cat::Health, "熬夜冲刺：健康 -3");
+    }
+
+    // 6.6 病倒判定（健康≤4；锻炼≥2次减半；运气降低概率）
+    if (!gameState.sickNext && gameState.health > 0 && gameState.health <= 4) {
+        double chance = std::max(0.05, 0.25 * (1.0 - gameState.playerStats.luck * 0.01));
+        if (gameState.exerciseCountThisMonth >= 2) chance *= 0.5;
+        if (Utils::randomBool(chance)) {
+            gameState.sickNext = true;
+            fact(SettlementFact::Cat::Health, "病倒了！下月行动力 -2、心态 -1（只能静养）");
+        }
+    }
+
     // 7. 健康检查
     if (gameState.health <= 0) {
-        gameState.settlementLogs.push_back("健康归零！游戏结束！");
+        fact(SettlementFact::Cat::Other, "健康归零！游戏结束！");
     }
 }
 
@@ -358,11 +335,11 @@ inline void recordExamScore(int score, int maxScore, bool isGaokao) {
     gameState.examRecords.push_back(rec);
 }
 
-// 获取学习效率（含焦虑影响）
+// 获取学习效率（含焦虑影响；钢铁意志特质免疫焦虑惩罚）
 inline double getStudyEfficiency() {
     double eff = getMoodEfficiency();
     eff *= gameState.efficiencyMultiplier;
-    if (gameState.isAnxious) eff *= 0.7;
+    if (gameState.isAnxious && !playerHasTrait("iron_will")) eff *= 0.7;
     return std::max(0.3, std::min(1.5, eff));
 }
 

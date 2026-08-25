@@ -31,13 +31,13 @@ cmake --build . --config Release
 
 ```
 OI_Simulator_GUI/
-├── main.cpp           # 主程序
+├── main.cpp           # 主程序（UI 视图）
+├── month_engine.hpp   # 月度引擎（回合流程规则）
 ├── types.hpp          # 类型定义
 ├── problem_pool.hpp   # 题目池
-├── events.hpp         # 事件系统
-├── training_events_data.hpp  # 训练事件
+├── events.hpp         # 属性变更入口 + 商店
 ├── game.hpp           # 游戏逻辑
+├── tests/             # Catch2 测试（tests/build_test_mingw.bat）
 ├── imgui/             # ImGui 库
-├── compile.bat        # 编译脚本
 └── CMakeLists.txt     # CMake 配置
 ```

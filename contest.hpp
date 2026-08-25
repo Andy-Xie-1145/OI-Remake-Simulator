@@ -2,6 +2,7 @@
 #define CONTEST_HPP
 
 #include "game.hpp"
+#include "topics.hpp"
 #include <cstdint>
 
 namespace Contest {
@@ -19,7 +20,7 @@ struct ContestResultView {
     std::vector<ContestProblemResult> problems;
     int expectedTotal = 0;
     int actualTotal = 0;
-    int determinationReward = 0;
+    int prizeMoney = 0;   // 比赛奖金（金钱）
     std::string aggregateLabel;
     int aggregateValue = 0;
     bool hasAggregate = false;
@@ -66,7 +67,14 @@ struct AwardRule {
 inline void applyAwardEffect(AwardEffect e) {
     switch (e) {
     case AwardEffect::SetProvincialTeamA: gameState.playerStats.isProvincialTeamA = true; break;
-    case AwardEffect::SetTrainingTeam: gameState.playerStats.isTrainingTeam = true; break;
+    case AwardEffect::SetTrainingTeam:
+        gameState.playerStats.isTrainingTeam = true;
+        if (!gameState.playerStats.isBaosong) {
+            gameState.playerStats.isBaosong = true;   // 保送锁定（结局矩阵）
+            logEvent("入选国家集训队——保送资格到手！文化课压力解除，高三 6 月将迎来庆功月。", "event");
+            gameState.playerStats.achievements.push_back("保送资格");
+        }
+        break;
     case AwardEffect::SetCandidateTeam: gameState.playerStats.isCandidateTeam = true; break;
     case AwardEffect::SetNationalTeam: gameState.playerStats.isNationalTeam = true; break;
     case AwardEffect::SetIOIgold: gameState.playerStats.isIOIgold = true; break;
@@ -121,7 +129,16 @@ inline int getScoreComponent(ScoreComponent c, int currentScore) {
     return 0;
 }
 
-// ========== 计算函数 ==========
+// ========== 计算函数（含专题「精通」加成） ==========
+
+// 子问题的主知识维度 → 专题 id 映射（dp/ds/str/graph/comb/adhoc）
+inline int dominantKnowledgeTopic(const SubProblem& sp) {
+    struct KV { int v; int topic; };
+    KV kvs[] = {{sp.dp,0},{sp.ds,1},{sp.str,2},{sp.graph,3},{sp.comb,4},{sp.adhoc,8}};
+    KV* best = nullptr;
+    for (auto& kv : kvs) if (!best || kv.v > best->v) best = &kv;
+    return (best && best->v > 0) ? best->topic : -1;
+}
 
 inline int calculateThinkTime(const SubProblem& sp) {
     if (gameState.debugmode) return 1;
@@ -132,14 +149,19 @@ inline int calculateThinkTime(const SubProblem& sp) {
     thinkTime += std::max(0, sp.graph - Utils::mapAttributeValue(gameState.playerStats.graph));
     thinkTime += std::max(0, sp.comb - Utils::mapAttributeValue(gameState.playerStats.combinatorics));
     thinkTime += sp.adhoc;
+    // 精通加成：主维度已精通 → 思考时间 -1（下限 1）
+    const int domTopic = dominantKnowledgeTopic(sp);
+    if (domTopic >= 0 && Topics::hasMastery(domTopic)) thinkTime = std::max(1, thinkTime - 1);
     return thinkTime;
 }
 
 inline int calculateCodeTime(const SubProblem& sp) {
     if (gameState.debugmode) return 1;
     int codeTime = sp.coding;
-    if (gameState.playerStats.quickness > 0) {
-        codeTime = std::max(1, codeTime - gameState.playerStats.quickness);
+    int effQuick = gameState.playerStats.quickness
+        + (Topics::hasMastery(9) ? 1 : 0);   // 手速特训精通：迅捷有效 +1
+    if (effQuick > 0) {
+        codeTime = std::max(1, codeTime - effQuick);
     }
     return codeTime;
 }
@@ -171,6 +193,7 @@ inline double calculateErrorRate(const SubProblem& sp) {
     baseProb += sp.trap * 0.05;
     baseProb -= gameState.playerStats.carefulness * 0.03;
     baseProb += std::pow(std::max(10 - gameState.mood, 0), 2) * 0.01;
+    if (Topics::hasMastery(10)) baseProb *= 0.9;  // 细心打磨精通：错误率 ×0.9
     baseProb *= (1.0 - calculateLuckReduction());
     return std::max(0.0, std::min(0.8, baseProb));
 }
@@ -324,7 +347,7 @@ inline void triggerRandomEvent(int problemIdx, int subProblemIdx) {
             },
             0.04 * (1.0 - luckReduction),
             "心态爆炸", "连续失败让你感到沮丧...", "心态值-1",
-            [&]() { gameState.mood = std::max(0, gameState.mood - 1); }
+            [&]() { applyStatDelta("mood", -1, "心态爆炸"); }
         },
         {
             [&]() {
@@ -333,7 +356,7 @@ inline void triggerRandomEvent(int problemIdx, int subProblemIdx) {
             },
             0.03,
             "灵光一闪", "突然想到了一个好方法！", "心态值+1",
-            [&]() { gameState.mood = std::min(MOOD_LIMIT, gameState.mood + 1); }
+            [&]() { applyStatDelta("mood", 1, "灵光一闪"); }
         },
         {
             [&]() {
@@ -348,13 +371,13 @@ inline void triggerRandomEvent(int problemIdx, int subProblemIdx) {
             [&]() { return lastNAre(gameState.lastActions, 2, "code"); },
             0.02 * (1.0 - luckReduction),
             "键盘故障", "键盘突然有点不太灵了...", "心态值-1",
-            [&]() { gameState.mood = std::max(0, gameState.mood - 1); }
+            [&]() { applyStatDelta("mood", -1, "键盘故障"); }
         },
         {
             [&]() { return true; },
             0.01 * (1.0 - luckReduction),
             "监考老师巡视", "监考老师正在经过你的座位...", "心态值-1",
-            [&]() { gameState.mood = std::max(0, gameState.mood - 1); }
+            [&]() { applyStatDelta("mood", -1, "监考老师巡视"); }
         },
     };
 
@@ -381,8 +404,8 @@ inline void triggerRandomEvent(int problemIdx, int subProblemIdx) {
 
 // ========== 核心比赛函数 ==========
 
-inline void start(int contestId) {
-    auto config = CONTEST_CONFIGS.at(contestId);
+// 唯一入口：按配置开始一场比赛
+inline void start(const ContestConfig& config) {
     gameState.currentContestName = config.name;
     gameState.timePoints = config.timePoints;
     gameState.currentProblem = 1;
@@ -414,10 +437,16 @@ inline void start(int contestId) {
 
     int moodDrop = 1 + gameState.playerStats.extraMoodDrop;
     if (gameState.playerStats.mental > 0) moodDrop = std::max(0, moodDrop - gameState.playerStats.mental);
-    gameState.mood = std::max(0, gameState.mood - moodDrop);
+    // 特质「考场杀手」：比赛入场心态降幅 -1
+    if (playerHasTrait("contest_beast")) moodDrop = std::max(0, moodDrop - 1);
+    applyStatDelta("mood", -moodDrop, "入场紧张");
 
     logEvent(config.name + "比赛正式开始！", "event");
     logEvent("进入考场，心态值-" + std::to_string(moodDrop) + "，当前心态值：" + std::to_string(gameState.mood), "event");
+}
+
+inline void start(int contestId) {
+    start(CONTEST_CONFIGS.at(contestId));
 }
 
 inline void think(int problemIdx, int subProblemIdx) {
@@ -432,7 +461,7 @@ inline void think(int problemIdx, int subProblemIdx) {
         if (sp.heat > 0) {
             int moodDrop = Utils::randomInt(0, sp.heat);
             if (gameState.playerStats.mental > 0) moodDrop = std::max(0, moodDrop - gameState.playerStats.mental);
-            gameState.mood = std::max(0, gameState.mood - moodDrop);
+            applyStatDelta("mood", -moodDrop, "红温效应");
             if (moodDrop > 0) logEvent("红温效应，心态-" + std::to_string(moodDrop), "think");
         }
     } else {
@@ -463,7 +492,7 @@ inline void code(int problemIdx, int subProblemIdx) {
         if (sp.heat > 0) {
             int moodDrop = sp.heat;
             if (gameState.playerStats.mental > 0) moodDrop = std::max(0, moodDrop - gameState.playerStats.mental);
-            gameState.mood = std::max(0, gameState.mood - moodDrop);
+            applyStatDelta("mood", -moodDrop, "红温效应");
             logEvent("红温效应，心态-" + std::to_string(moodDrop), "code");
         }
     } else {
@@ -472,7 +501,7 @@ inline void code(int problemIdx, int subProblemIdx) {
         if (state.codeProgress >= calculateCodeTime(sp)) {
             state.errorRate = calculateErrorRate(sp);
             if (sp.inspire > 0) {
-                gameState.mood = std::min(MOOD_LIMIT, gameState.mood + sp.inspire);
+                applyStatDelta("mood", sp.inspire, "激励效果");
                 logEvent("激励效果，心态+" + std::to_string(sp.inspire), "code");
             }
         }
@@ -500,7 +529,7 @@ inline void check(int problemIdx, int subProblemIdx) {
     double errorRate = state.errorRate;
     if (Utils::randomBool(errorRate)) {
         if (isIOIContest && Utils::randomBool(0.08 * (1.0 - calculateLuckReduction()))) {
-            gameState.mood = std::max(0, gameState.mood - 1);
+            applyStatDelta("mood", -1, "服务器爆炸");
             logEvent("服务器爆炸，心态-1", "check");
         } else {
             if (!isIOIContest) {
@@ -515,7 +544,9 @@ inline void check(int problemIdx, int subProblemIdx) {
         const auto& sp = gameState.subProblems[problemIdx][subProblemIdx];
         state.isCodeComplete = true;
         logEvent((isIOIContest ? "提交" : "对拍") + std::string("成功！获得 ") + std::to_string(sp.score) + " 分", "check");
-        if (sp.inspire > 0) gameState.mood = std::min(MOOD_LIMIT, gameState.mood + sp.inspire);
+        gameState.carefulChecks++;   // 累计成功对拍/提交（细心专题进度）
+        Topics::onCheckSuccess();
+        if (sp.inspire > 0) applyStatDelta("mood", sp.inspire, "提交成功激励");
     }
     triggerRandomEvent(problemIdx, subProblemIdx);
 }
@@ -743,13 +774,13 @@ inline ContestResultView finalize() {
         break;
     }
 
-    result.determinationReward = totalActualScore * 5;
-    gameState.playerStats.determination += result.determinationReward;
+    // 比赛奖金（金钱，按实际得分发放）
+    result.prizeMoney = totalActualScore * 5;
 
     const int minMood = std::min(5 + gameState.playerStats.mental, 10);
     if (gameState.mood < minMood) {
         const int recovery = minMood - gameState.mood;
-        gameState.mood = minMood;
+        gameState.mood = std::min(gameState.moodCap, minMood);
         logEvent("比赛结束后心态自动恢复：+" + std::to_string(recovery) +
                      "，当前心态值：" + std::to_string(gameState.mood), "event");
     }

@@ -77,11 +77,7 @@ inline void start(bool isGaokao) {
     examState.totalQ = isGaokao ? 8 : 5;
     examState.currentQ = 0;
 
-    int year = gameState.currentYear;
-    int baseDiff = (year == 1) ? 3 : (year == 2) ? 4 : 5;
-
     for (int i = 0; i < examState.totalQ; ++i) {
-        int diff = baseDiff + Utils::randomInt(0, 2);
         examState.phases.push_back(Phase::Read);
         examState.results.push_back(-1);
         examState.guessed.push_back(false);

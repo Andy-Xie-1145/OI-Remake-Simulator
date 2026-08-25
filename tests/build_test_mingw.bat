@@ -23,7 +23,7 @@ echo.
 set OUTPUT_DIR=output
 if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
 
-set SOURCES=test_main.cpp test_types.cpp test_game.cpp test_contest.cpp
+set SOURCES=test_main.cpp test_types.cpp test_game.cpp test_contest.cpp test_engine.cpp test_features.cpp
 set INCLUDES=-I.. -I../imgui
 
 set CXXFLAGS=-std=c++17 -Wall -Wextra -O0 -g

@@ -51,6 +51,8 @@ cmake-build-*/
 .claude/
 *.claude
 CLAUDE.md
+.trae/
+imgui.ini
 *.suo
 *.user
 *.sln.docstates

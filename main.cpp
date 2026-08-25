@@ -4,6 +4,8 @@
 #include "activities.hpp"
 #include "talents.hpp"
 #include "culture_exam.hpp"
+#include "month_engine.hpp"
+#include "save_system.hpp"
 #include "imgui.h"
 #include "imgui_impl_dx11.h"
 #include "imgui_impl_win32.h"
@@ -57,7 +59,7 @@ namespace
         GameOver
     };
 
-    constexpr const char *kGameVersion = "v0.2.0";
+    constexpr const char *kGameVersion = "v0.3.0";
     constexpr const char *kIntroStoryText =
         "我重生了？\n"
         "参加完省队选拔后，你意识到自己无缘省队了。也许从此就和 OI 无缘了。\n\n"
@@ -127,8 +129,6 @@ namespace
         gameState.subProblems.clear();
         gameState.contestStates.clear();
         gameState.lastActions.clear();
-        gameState.currentPhase = 1;
-        gameState.totalTrainingEvents = 5;
         gameState.currentShopPrices.clear();
         gameState.gameLog.clear();
         clearPendingContestNotice();
@@ -148,7 +148,7 @@ namespace
         gameState.background.clear();
         gameState.ownedItems.clear();
         gameState.cultureEfficiency = 1.0;
-        gameState.settlementLogs.clear();
+        gameState.settlementFacts.clear();
         gameState.examRecords.clear();
         gameState.anxietyMonths = 0;
         gameState.isAnxious = false;
@@ -175,19 +175,6 @@ namespace
     {
         const auto it = DIFFICULTY_SETTINGS.find(key);
         return it != DIFFICULTY_SETTINGS.end() ? it->second.name : key;
-    }
-
-    std::string BuildEndingSummary()
-    {
-        if (gameState.playerStats.isIOIgold)
-            return "你成功拿到了 IOI 金牌，最终还是站在了世界 OI 之巅。";
-        if (gameState.playerStats.isNationalTeam)
-            return "你成为了中国国家队选手，代表中国参加了 IOI。";
-        if (gameState.playerStats.isTrainingTeam)
-            return "你作为国家集训队选手，已经具备了保送资格。";
-        if (gameState.playerStats.isProvincialTeam)
-            return "作为省队选手，你在 OI 的道路上已经取得了不错的成绩。";
-        return "虽然未能进入省队，但你依然收获了宝贵的经验。";
     }
 
     std::string BuildRequirementText(const SubProblem &sp, int problemIdx, int subProblemIdx)
@@ -224,8 +211,7 @@ namespace
             }
         }
 
-        if (!option.nextEvent.empty() || !option.randomChoices.empty() ||
-            !option.probabilityEffects.empty() || !option.nextEventProbability.empty())
+        if (!option.randomChoices.empty())
         {
             effects.push_back("?");
         }
@@ -259,14 +245,10 @@ namespace
         std::string fontWarning_;
         GuiScreen helpReturnScreen_ = GuiScreen::Home;
 
-        // v2 月回合制
-        Calendar::MonthInfo currentMonthInfo_;
-        int pendingContestIdx_ = 0;  // 当前待打的比赛在 contestIds 中的索引
-        int pendingContestId_ = 0;   // 当前正在打的比赛 ID
+        // v2 月回合制（规则全部在 Engine，UI 只留视图状态）
         int activitySubMenu_ = -1;   // -1=主菜单, 0=Learn, 1=网赛, 2=刷题, 3=自定义比赛
         int customTemplateIdx_ = -1; // 自定义比赛选中的模板索引
-        bool isActivityContest_ = false; // true=当前比赛是活动(模拟赛/刷题), false=正式比赛
-        bool showShop_ = false;         // 商店弹窗
+        bool showShop_ = false;      // 商店弹窗
 
         void ResetToHome();
         int TalentBudget() const;
@@ -275,13 +257,9 @@ namespace
         void BeginSetup();
         void ApplyTalentAllocation();
 
-        // v2 月回合流程
-        void StartMonthLoop();
-        void EndMonthAction();
-        void ContinueAfterContest();
-        void ContinueAfterSettlement();
+        // v2 月回合流程：UI 只做「发指令 → 按引擎阶段同步屏幕」
+        void SyncFromEngine();
 
-        void BeginContestStep(int contestId);
         void FinalizeContest();
         void HandleContestAction(int subProblemIdx, char action);
         void ModifyCodeProblem(int problemIdx, int subProblemIdx);
@@ -353,8 +331,7 @@ namespace
         talents_.fill(0);
         contestResult_ = ContestResultView();
         gameOver_ = GameOverView();
-        pendingContestIdx_ = 0;
-        pendingContestId_ = 0;
+        Engine::hardReset();
         gameInitialized_ = false;
         helpReturnScreen_ = GuiScreen::Home;
     }
@@ -370,7 +347,6 @@ namespace
         showTalentPage_ = false;
         contestResult_ = ContestResultView();
         gameOver_ = GameOverView();
-        pendingContestIdx_ = 0;
         gameInitialized_ = true;
         screen_ = GuiScreen::IntroStory;
     }
@@ -394,7 +370,8 @@ namespace
         }
 
         // 进入月回合
-        StartMonthLoop();
+        Engine::startNewGame();
+        SyncFromEngine();
     }
 
     void GuiApp::OpenHelp()
@@ -404,117 +381,41 @@ namespace
         helpReturnScreen_ = screen_;
         screen_ = GuiScreen::Help;
     }
-    void GuiApp::StartMonthLoop()
+
+    // 按引擎给出的当前阶段同步屏幕（UI 不再自行决定「接下来是什么」）
+    void GuiApp::SyncFromEngine()
     {
-        currentMonthInfo_ = Calendar::getMonthInfo(1);
-        Calendar::startMonth(1);
-        pendingContestIdx_ = 0;
+        if (Engine::isGameOver())
+        {
+            SetGameOver(Engine::gameOverReason());
+            return;
+        }
+        if (Engine::hasPhase())
+        {
+            switch (Engine::currentPhase().kind)
+            {
+            case Engine::Phase::Kind::Contest:
+                contestResult_ = ContestResultView();
+                screen_ = GuiScreen::Contest;
+                break;
+            case Engine::Phase::Kind::Exam:
+                screen_ = GuiScreen::CultureExam;
+                break;
+            case Engine::Phase::Kind::Settlement:
+                screen_ = GuiScreen::MonthSettlement;
+                break;
+            }
+            return;
+        }
         screen_ = GuiScreen::MonthAction;
-        logEvent("高中生活开始了！第1年7月", "event");
-    }
-
-    void GuiApp::EndMonthAction()
-    {
-        // 完整月度结算
-        bool hasContest = !currentMonthInfo_.contestIds.empty();
-        settleMonth(hasContest);
-
-        // 检查健康
-        if (Calendar::isGameOver()) {
-            SetGameOver("你的身体撑不住了...健康归零。");
-            return;
-        }
-
-        // 检查是否需要打比赛
-        if (!currentMonthInfo_.contestIds.empty() && pendingContestIdx_ < static_cast<int>(currentMonthInfo_.contestIds.size())) {
-            pendingContestId_ = currentMonthInfo_.contestIds[pendingContestIdx_];
-            contestResult_ = ContestResultView();
-            Contest::start(pendingContestId_);
-            isActivityContest_ = false;
-            screen_ = GuiScreen::Contest;
-            return;
-        }
-
-        // 没有比赛 → 检查是否有考试
-        if (currentMonthInfo_.hasExam) {
-            CultureExam::start(currentMonthInfo_.isGaokao);
-            screen_ = GuiScreen::CultureExam;
-            return;
-        }
-
-        // 没有比赛也没有考试 → 直接到结算页
-        screen_ = GuiScreen::MonthSettlement;
-    }
-
-    void GuiApp::ContinueAfterContest()
-    {
-        // 比赛结束，检查是否还有多日比赛
-        pendingContestIdx_++;
-        if (pendingContestIdx_ < static_cast<int>(currentMonthInfo_.contestIds.size())) {
-            pendingContestId_ = currentMonthInfo_.contestIds[pendingContestIdx_];
-            contestResult_ = ContestResultView();
-            Contest::start(pendingContestId_);
-            isActivityContest_ = false;
-            screen_ = GuiScreen::Contest;
-            return;
-        }
-        // 所有比赛打完 → 检查是否有考试
-        if (currentMonthInfo_.hasExam) {
-            CultureExam::start(currentMonthInfo_.isGaokao);
-            screen_ = GuiScreen::CultureExam;
-            return;
-        }
-        // 没有考试 → 结算页
-        screen_ = GuiScreen::MonthSettlement;
-    }
-
-    void GuiApp::ContinueAfterSettlement()
-    {
-        // 推进到下个月
-        int nextMonth = gameState.currentMonth + 1;
-        if (nextMonth > 36) {
-            SetGameOver("三年高中结束了。你的 OI 之旅到此告一段落。");
-            return;
-        }
-        if (Calendar::isGameOver()) {
-            SetGameOver("你的身体撑不住了...健康归零。");
-            return;
-        }
-
-        // 学年过渡检查
-        int oldYear = monthToYear(gameState.currentMonth);
-        int newYear = monthToYear(nextMonth);
-        if (oldYear != newYear) {
-            applyYearTransition(oldYear, newYear);
-        }
-
-        currentMonthInfo_ = Calendar::getMonthInfo(nextMonth);
-        Calendar::startMonth(nextMonth);
-        pendingContestIdx_ = 0;
-
-        if (Calendar::isGameOver()) {
-            SetGameOver("你的身体撑不住了...健康归零。");
-            return;
-        }
-
-        logEvent("第" + std::to_string(gameState.currentYear) + "年" +
-                 getCalendarMonthName(gameState.calendarMonth), "event");
-        screen_ = GuiScreen::MonthAction;
-    }
-
-    void GuiApp::BeginContestStep(int contestId)
-    {
-        contestResult_ = ContestResultView();
-        Contest::start(contestId);
-        screen_ = GuiScreen::Contest;
+        // 存档点：进入新月（或月中回到行动阶段）时自动落盘
+        Save::write();
     }
 
     void GuiApp::FinalizeContest()
     {
-        contestResult_ = Contest::finalize();
-        // 奖金在此一次性结算（FinalizeContest 是产生比赛结果的唯一入口）。
-        // 切勿放在 RenderContestResult() 中——那是每帧调用的渲染函数，会逐帧重复累加。
-        gameState.money += contestResult_.determinationReward;
+        // 奖金入账与结果产出都在引擎内完成（唯一入口，逐帧渲染不会重复累加）
+        contestResult_ = Engine::finalizeCurrentContest();
         screen_ = GuiScreen::ContestResult;
     }
 
@@ -749,6 +650,25 @@ namespace
         if (OIWidgets::PrimaryButton("开始游戏  →", ImVec2(btnWidth, kPrimaryButtonHeight)))
             screen_ = GuiScreen::Difficulty;
 
+        // 检测到存档 → 提供继续入口
+        if (Save::exists())
+        {
+            ImGui::Spacing();
+            ImGui::SetCursorPosX((ww - btnWidth) * 0.5f);
+            if (OIWidgets::PrimaryButton("继续游戏（读取存档）", ImVec2(btnWidth, kSecondaryButtonHeight)))
+            {
+                if (Save::read())
+                {
+                    gameInitialized_ = true;
+                    SyncFromEngine();
+                }
+                else
+                {
+                    logEvent("存档读取失败（版本不兼容或文件损坏）", "event");
+                }
+            }
+        }
+
         ImGui::Spacing();
         ImGui::Spacing();
         const float hintW = ImGui::CalcTextSize("按").x + 6 + ImGui::CalcTextSize("F1").x + 16 + 6 + ImGui::CalcTextSize("可随时查看帮助").x;
@@ -872,8 +792,13 @@ namespace
                            "健康（0-20）：归零则游戏结束。注意休息。",
                            "遗忘：连续 2 月未学习的知识维度会 -1。",
                            "停课：每月+2 AP，但心态-3，不能学文化课。",
+                           "熬夜：本月+2 AP，但结算健康-3、焦虑概率×1.3；与停课互斥。",
+                           "体育锻炼（1 AP）：健康+2；本月锻炼≥2次 → 病倒概率减半。",
+                           "病倒：健康≤4 时月末有概率发生，下月行动力-2、心态-1。",
+                           "专题任务：3 个月内完成 4 次匹配行动 → 该维度永久精通（思考时间-1）。",
+                           "保送：入选国家集训队后文化课压力免除，高考替换为庆功月。",
                            "特质：从模拟赛/刷题中有概率获得，最多 4 个。",
-                           "背景：开局选择，影响心态上限、学习效率、焦虑概率等。"}, 6},
+                           "背景：开局选择，影响心态上限、学习效率、焦虑概率等。"}, 11},
             {"属性速览", {"9 维知识：DP / DS / 字符串 / 图论 / 组合计数 / 数学 / 几何 / 高级DS / 构造",
                            "思维：影响思考成功率。代码：影响写代码成功率。",
                            "细心：降低对拍翻车概率。迅捷：降低写代码耗时。",
@@ -1025,17 +950,17 @@ namespace
 
             ImGui::Spacing();
             bool any = false;
-            if (!currentMonthInfo_.contestIds.empty()) {
+            if (!Engine::monthInfo().contestIds.empty()) {
                 std::string names;
-                for (size_t k = 0; k < currentMonthInfo_.contestIds.size(); ++k) {
+                for (size_t k = 0; k < Engine::monthInfo().contestIds.size(); ++k) {
                     if (k) names += " ";
-                    auto it = CONTEST_CONFIGS.find(currentMonthInfo_.contestIds[k]);
+                    auto it = CONTEST_CONFIGS.find(Engine::monthInfo().contestIds[k]);
                     names += (it != CONTEST_CONFIGS.end()) ? it->second.name : "比赛";
                 }
                 OIWidgets::TierBadge(("本月比赛 · " + names).c_str(), OITheme::Col::LgOrange);
                 any = true;
             }
-            if (currentMonthInfo_.hasExam) {
+            if (Engine::monthInfo().hasExam) {
                 if (any) ImGui::SameLine();
                 OIWidgets::TierBadge("本月考试", OITheme::Col::LgBlue);
                 any = true;
@@ -1083,14 +1008,55 @@ namespace
         }
         OIWidgets::EndCard();
 
-        if (ImGui::Checkbox("停课  (+2 AP · 心态 −3 · 禁文化课)", &gameState.isTingke)) {
-            const auto& settings = DIFFICULTY_SETTINGS.at(gameState.gameDifficulty);
-            int baseAp = gameState.isTingke ? 10 : 8;
-            baseAp += settings.apBonus;
-            int spent = gameState.maxAp - gameState.ap;
-            gameState.maxAp = baseAp - currentMonthInfo_.apDeduction;
-            gameState.ap = std::max(0, gameState.maxAp - spent);
+        {
+            bool tingkeUi = gameState.isTingke;
+            ImGui::Checkbox("停课  (+2 AP · 心态 −3 · 禁文化课)", &tingkeUi);
+            if (tingkeUi != gameState.isTingke) Engine::toggleTingke();
         }
+        ImGui::SameLine(0, 18);
+        {
+            bool aoyeUi = gameState.isAoYe;
+            ImGui::Checkbox("熬夜  (+2 AP · 结算健康 −3 · 焦虑概率 ×1.3)", &aoyeUi);
+            if (aoyeUi != gameState.isAoYe) Engine::toggleAoYe();
+        }
+
+        // —— 专题任务 ——
+        if (OIWidgets::BeginCard("topic_card", ImVec2(0, 0)))
+        {
+            if (const Topics::TopicDef* t = Topics::active())
+            {
+                const int goal = (t->kind == Topics::Kind::Careful) ? Topics::CAREFUL_GOAL : Topics::GOAL;
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextColored(OITheme::Col::Teal, "◆ 专题进行中：%s", t->name);
+                ImGui::SameLine(0, 12);
+                char prog[32];
+                snprintf(prog, sizeof prog, "%d / %d", gameState.topicProgress, goal);
+                ImGui::TextColored(OITheme::Col::TxtDim, "%s", prog);
+                ImGui::SameLine();
+                OIWidgets::Bar(gameState.topicProgress / static_cast<float>(goal),
+                               ImVec2(ImGui::GetContentRegionAvail().x - 90.0f, 6.0f), OITheme::Col::Teal);
+                ImGui::SameLine(0, 10);
+                if (ImGui::SmallButton("放弃专题##abandon_topic")) Topics::abandon();
+            }
+            else
+            {
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextColored(OITheme::Col::TxtFaint, "专题任务（完成得永久精通加成）：");
+                bool anyBtn = false;
+                for (const auto& t : Topics::ALL)
+                {
+                    if (Topics::hasMastery(t.id)) continue;
+                    if (anyBtn) ImGui::SameLine(0, 6);
+                    ImGui::PushID(t.id);
+                    if (ImGui::Button(t.name, ImVec2(0, 24))) Topics::accept(t.id);
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", t.desc);
+                    ImGui::PopID();
+                    anyBtn = true;
+                }
+                if (!anyBtn) ImGui::TextColored(OITheme::Col::Ok, "全部专题均已精通！");
+            }
+        }
+        OIWidgets::EndCard();
 
         ImGui::Spacing();
 
@@ -1113,15 +1079,21 @@ namespace
                     int val = 0;
                     auto it = STAT_MEMBER_MAP.find(dim);
                     if (it != STAT_MEMBER_MAP.end()) val = gameState.playerStats.*(it->second);
-                    bool canAfford = gameState.ap >= 2;
+                    bool canAfford = Engine::canDoActivity(Activity::Learn);
                     ImGui::PushID(i);
                     ImGui::BeginDisabled(!canAfford);
                     std::string label = Utils::getStatName(dim) + "    " + std::to_string(val) + "##learn";
                     if (ImGui::Button(label.c_str(), ImVec2(-1.0f, 34.0f))) {
-                        gameState.ap -= 2;
-                        gameState.health = std::max(0, gameState.health - 1);
-                        auto result = Activity::execute(Activity::Learn, i);
-                        for (const auto& log : result.logs) logEvent(log, "event");
+                        auto outcome = Engine::doActivity(Activity::Learn, i);
+                        if (outcome.activity.startContest) {
+                            contestResult_ = ContestResultView();
+                            ImGui::EndDisabled();
+                            ImGui::Columns(1);
+                            ImGui::EndTabItem();
+                            ImGui::EndTabBar();
+                            screen_ = GuiScreen::Contest;
+                            return;
+                        }
                     }
                     ImGui::EndDisabled();
                     OIWidgets::Bar(val / 20.0f, ImVec2(ImGui::GetContentRegionAvail().x, 6.0f), OITheme::Col::Teal);
@@ -1140,7 +1112,7 @@ namespace
                 ImGui::Separator();
                 for (int i = 0; i < static_cast<int>(Activity::MOCK_CONTEST_OPTIONS.size()); ++i) {
                     const auto& opt = Activity::MOCK_CONTEST_OPTIONS[i];
-                    bool canAfford = gameState.ap >= 3;
+                    bool canAfford = Engine::canDoActivity(Activity::MockContest);
                     ImGui::PushID(i);
                     ImGui::BeginChild(("mock_" + std::to_string(i)).c_str(), ImVec2(0.0f, 48.0f), true);
                     ImGui::Text("%s", opt.name);
@@ -1149,14 +1121,9 @@ namespace
                     ImGui::SameLine(400.0f);
                     ImGui::BeginDisabled(!canAfford);
                     if (ImGui::Button("参加##mock", ImVec2(80.0f, 28.0f))) {
-                        gameState.ap -= 3;
-                        gameState.health = std::max(0, gameState.health - 1);
-                        auto result = Activity::execute(Activity::MockContest, i);
-                        for (const auto& log : result.logs) logEvent(log, "event");
-                        if (result.startContest) {
+                        auto outcome = Engine::doActivity(Activity::MockContest, i);
+                        if (outcome.activity.startContest) {
                             contestResult_ = ContestResultView();
-                            Contest::start(result.contestId);
-                            isActivityContest_ = true;
                             screen_ = GuiScreen::Contest;
                             ImGui::EndDisabled();
                             ImGui::EndChild();
@@ -1180,7 +1147,7 @@ namespace
                 ImGui::Separator();
                 for (int i = 0; i < static_cast<int>(Activity::PRACTICE_OPTIONS.size()); ++i) {
                     const auto& opt = Activity::PRACTICE_OPTIONS[i];
-                    bool canAfford = gameState.ap >= 2;
+                    bool canAfford = Engine::canDoActivity(Activity::Practice);
                     ImGui::PushID(i);
                     int contestId = opt.contestId;
                     auto cfgIt = CONTEST_CONFIGS.find(contestId);
@@ -1194,14 +1161,9 @@ namespace
                     ImGui::SameLine(300.0f);
                     ImGui::BeginDisabled(!canAfford);
                     if (ImGui::Button("开刷##prac", ImVec2(80.0f, 28.0f))) {
-                        gameState.ap -= 2;
-                        gameState.health = std::max(0, gameState.health - 1);
-                        auto result = Activity::execute(Activity::Practice, i);
-                        for (const auto& log : result.logs) logEvent(log, "event");
-                        if (result.startContest) {
+                        auto outcome = Engine::doActivity(Activity::Practice, i);
+                        if (outcome.activity.startContest) {
                             contestResult_ = ContestResultView();
-                            Contest::start(result.contestId);
-                            isActivityContest_ = true;
                             screen_ = GuiScreen::Contest;
                             ImGui::EndDisabled();
                             ImGui::EndChild();
@@ -1243,39 +1205,19 @@ namespace
                     ImGui::TextColored(ImVec4(0.40f, 0.72f, 0.90f, 1.0f), "已选择：%s", tpl.name);
                     ImGui::BulletText("题目数：%d  |  时间：%d  |  赛制：%s", tpl.numProblems, tpl.timePoints, tpl.isIOI ? "IOI" : "OI");
                     ImGui::Spacing();
-                    bool canAfford = gameState.ap >= 4;
+                    bool canAfford = Engine::canDoActivity(Activity::CustomContest);
                     ImGui::BeginDisabled(!canAfford);
                     if (ImGui::Button("开始自定义比赛", ImVec2(200.0f, 36.0f))) {
-                        gameState.ap -= 4;
-                        gameState.health = std::max(0, gameState.health - 2);
-                        gameState.currentContestName = tpl.name;
-                        gameState.timePoints = tpl.timePoints;
-                        gameState.totalProblems = tpl.numProblems;
-                        gameState.problems.clear();
-                        gameState.subProblems.clear();
-                        gameState.contestStates.clear();
-                        for (int p = 0; p < tpl.numProblems; ++p) {
-                            Problem prob;
-                            prob.name = generateProblemName();
-                            prob.level = (tpl.ranges[p].first + tpl.ranges[p].second) / 2;
-                            prob.tag = p;
-                            gameState.problems.push_back(prob);
-                            auto selected = selectProblemFromRange(tpl.ranges[p].first, tpl.ranges[p].second);
-                            gameState.subProblems.push_back(selected.parts);
-                            std::vector<ContestSubProblemState> states(selected.parts.size());
-                            gameState.contestStates.push_back(states);
-                            gameState.problems.back().name = generateProblemName();
+                        // 模板经唯一 adapter 进入 Contest::start —— 不再内联手搓比赛状态
+                        if (Engine::startCustomContest(customTemplateIdx_)) {
+                            customTemplateIdx_ = -1;
+                            contestResult_ = ContestResultView();
+                            screen_ = GuiScreen::Contest;
+                            ImGui::EndDisabled();
+                            ImGui::EndTabItem();
+                            ImGui::EndTabBar();
+                            return;
                         }
-                        gameState.currentProblem = 1;
-                        isActivityContest_ = true;
-                        contestResult_ = ContestResultView();
-                        screen_ = GuiScreen::Contest;
-                        customTemplateIdx_ = -1;
-                        logEvent("开始自定义比赛：" + std::string(tpl.name), "event");
-                        ImGui::EndDisabled();
-                        ImGui::EndTabItem();
-                        ImGui::EndTabBar();
-                        return;
                     }
                     ImGui::EndDisabled();
                 }
@@ -1298,39 +1240,41 @@ namespace
             if (act.type == Activity::Rest) hasRestBtn = true;
             if (act.type == Activity::SummerCamp) hasCampBtn = true;
         }
+        const bool hasExerciseBtn = true;  // 体育锻炼常驻（1 AP）
 
-        if (hasCultureBtn || hasRestBtn || hasCampBtn) {
+        if (hasCultureBtn || hasRestBtn || hasCampBtn || hasExerciseBtn) {
             if (hasCultureBtn) {
-                bool canDo = gameState.ap >= 2 && !gameState.isTingke;
+                bool canDo = Engine::canDoActivity(Activity::StudyCulture);
                 ImGui::BeginDisabled(!canDo);
                 if (ImGui::Button("学文化课 · 2 AP", ImVec2(150.0f, 38.0f))) {
-                    gameState.ap -= 2;
-                    gameState.health = std::max(0, gameState.health - 1);
-                    auto result = Activity::execute(Activity::StudyCulture);
-                    for (const auto& log : result.logs) logEvent(log, "event");
+                    Engine::doActivity(Activity::StudyCulture);
                 }
                 ImGui::EndDisabled();
                 ImGui::SameLine();
             }
             if (hasRestBtn) {
-                bool canDo = gameState.ap >= 2;
+                bool canDo = Engine::canDoActivity(Activity::Rest);
                 ImGui::BeginDisabled(!canDo);
                 if (ImGui::Button("休息 · 2 AP", ImVec2(130.0f, 38.0f))) {
-                    gameState.ap -= 2;
-                    gameState.health = std::max(0, gameState.health - 1);
-                    auto result = Activity::execute(Activity::Rest);
-                    for (const auto& log : result.logs) logEvent(log, "event");
+                    Engine::doActivity(Activity::Rest);
                 }
                 ImGui::EndDisabled();
                 ImGui::SameLine();
             }
             if (hasCampBtn) {
-                bool canDo = gameState.ap >= 4;
+                bool canDo = Engine::canDoActivity(Activity::SummerCamp);
                 ImGui::BeginDisabled(!canDo);
                 if (ImGui::Button("集训 · 4 AP", ImVec2(130.0f, 38.0f))) {
-                    gameState.ap -= 4;
-                    auto result = Activity::execute(Activity::SummerCamp);
-                    for (const auto& log : result.logs) logEvent(log, "event");
+                    Engine::doActivity(Activity::SummerCamp);
+                }
+                ImGui::EndDisabled();
+                ImGui::SameLine();
+            }
+            {
+                bool canDo = Engine::canDoActivity(Activity::Exercise);
+                ImGui::BeginDisabled(!canDo);
+                if (ImGui::Button("锻炼 · 1 AP", ImVec2(120.0f, 38.0f))) {
+                    Engine::doActivity(Activity::Exercise);
                 }
                 ImGui::EndDisabled();
                 ImGui::SameLine();
@@ -1377,18 +1321,9 @@ namespace
                         if (opt.text == "放弃购买") {
                             showShop_ = false;
                             ImGui::CloseCurrentPopup();
-                        } else if (gameState.money >= opt.cost) {
-                            gameState.money -= opt.cost;
-                            applySelectedOptionEffects(opt);
-                            gameState.purchasedItems.insert(opt.text);
-                            logEvent("购买：" + opt.text + "（-" + std::to_string(opt.cost) + "元）", "event");
-                            auto incIt = SHOP_PRICE_INCREMENTS.find(gameState.gameDifficulty);
-                            if (incIt != SHOP_PRICE_INCREMENTS.end()) {
-                                auto priceIt = incIt->second.find(opt.text);
-                                if (priceIt != incIt->second.end()) {
-                                    gameState.currentShopPrices[opt.text] += priceIt->second;
-                                }
-                            }
+                        } else {
+                            // 交易规则（扣钱/生效/记账/涨价）在引擎内
+                            Engine::buyShopItem(opt);
                         }
                     }
                     ImGui::EndDisabled();
@@ -1402,7 +1337,8 @@ namespace
         ImGui::SameLine();
         ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - kPrimaryButtonWidth);
         if (OIWidgets::PrimaryButton("结束本月  →", ImVec2(kPrimaryButtonWidth, kPrimaryButtonHeight))) {
-            EndMonthAction();
+            Engine::endMonthActions();
+            SyncFromEngine();
         }
     }
 
@@ -1414,17 +1350,13 @@ namespace
         RenderSection("SETTLEMENT", head);
 
         std::vector<const char*> healthLogs, knowledgeLogs, moneyLogs, otherLogs;
-        for (const auto& log : gameState.settlementLogs) {
-            if (log.find("健康") != std::string::npos || log.find("心态") != std::string::npos ||
-                log.find("焦虑") != std::string::npos)
-                healthLogs.push_back(log.c_str());
-            else if (log.find("遗忘") != std::string::npos || log.find("月未学") != std::string::npos)
-                knowledgeLogs.push_back(log.c_str());
-            else if (log.find("零花钱") != std::string::npos || log.find("元") != std::string::npos ||
-                     log.find("收入") != std::string::npos)
-                moneyLogs.push_back(log.c_str());
-            else
-                otherLogs.push_back(log.c_str());
+        for (const auto& fact : gameState.settlementFacts) {
+            switch (fact.cat) {
+            case SettlementFact::Cat::Health:    healthLogs.push_back(fact.text.c_str()); break;
+            case SettlementFact::Cat::Knowledge: knowledgeLogs.push_back(fact.text.c_str()); break;
+            case SettlementFact::Cat::Economy:   moneyLogs.push_back(fact.text.c_str()); break;
+            default:                             otherLogs.push_back(fact.text.c_str()); break;
+            }
         }
 
         const float gap = 14.0f;
@@ -1538,14 +1470,15 @@ namespace
         ImGui::Spacing();
         ImGui::Spacing();
         if (OIWidgets::PrimaryButton("继续  →", ImVec2(kPrimaryButtonWidth, kPrimaryButtonHeight))) {
-            ContinueAfterSettlement();
+            Engine::phaseFinished();
+            SyncFromEngine();
         }
     }
 
     void GuiApp::RenderCultureExam()
     {
         auto& es = CultureExam::examState;
-        bool isGaokao = currentMonthInfo_.isGaokao;
+        bool isGaokao = Engine::monthInfo().isGaokao;
         const char* examTitle = isGaokao ? "高考" : "期末考试";
         int cm = gameState.calendarMonth;
         if (!isGaokao && (cm == 5 || cm == 11)) examTitle = "期中考试";
@@ -1603,9 +1536,10 @@ namespace
 
             ImGui::Spacing();
             if (OIWidgets::PrimaryButton("查看月度结算  →", ImVec2(kPrimaryButtonWidth, kPrimaryButtonHeight))) {
-                recordExamScore(score, es.maxScore, isGaokao);
-                settleMonth(!currentMonthInfo_.contestIds.empty());
-                screen_ = GuiScreen::MonthSettlement;
+                // 记录成绩归引擎；结算已在「结束本月」时恰好执行过一次（修复原双重结算）
+                Engine::examFinished(score, es.maxScore, isGaokao);
+                Engine::phaseFinished();
+                SyncFromEngine();
             }
             return;
         }
@@ -1721,7 +1655,8 @@ namespace
             ImGui::SameLine(0, 28);
             ImGui::BeginGroup();
             ImGui::TextColored(OITheme::Col::TxtFaint, "心态");
-            ImVec4 mc = gameState.mood >= MOOD_LIMIT * 2 / 3 ? OITheme::Col::Ok : (gameState.mood >= MOOD_LIMIT / 3 ? OITheme::Col::Warn : OITheme::Col::Bad);
+            const int cap = gameState.moodCap;  // 心态上限唯一真相
+            ImVec4 mc = gameState.mood >= cap * 2 / 3 ? OITheme::Col::Ok : (gameState.mood >= cap / 3 ? OITheme::Col::Warn : OITheme::Col::Bad);
             if (g_fontH1) ImGui::PushFont(g_fontH1);
             ImGui::PushStyleColor(ImGuiCol_Text, mc);
             ImGui::Text("%d", gameState.mood);
@@ -1729,7 +1664,7 @@ namespace
             if (g_fontH1) ImGui::PopFont();
             ImGui::SameLine(0, 4);
             ImGui::AlignTextToFramePadding();
-            ImGui::TextColored(OITheme::Col::TxtFaint, "/ %d", MOOD_LIMIT);
+            ImGui::TextColored(OITheme::Col::TxtFaint, "/ %d", cap);
             ImGui::EndGroup();
 
             ImGui::SameLine(0, 28);
@@ -1976,7 +1911,7 @@ namespace
         metric("实际总分", contestResult_.actualTotal,
                contestResult_.actualTotal >= contestResult_.expectedTotal ? OITheme::Col::Ok : OITheme::Col::Warn, "");
         ImGui::NextColumn();
-        metric("奖金", contestResult_.determinationReward, OITheme::Col::Warn, " 元");
+        metric("奖金", contestResult_.prizeMoney, OITheme::Col::Warn, " 元");
         ImGui::NextColumn();
         if (contestResult_.hasAggregate)
         {
@@ -1998,14 +1933,14 @@ namespace
         ImGui::Spacing();
         if (OIWidgets::PrimaryButton("继续后续流程  →", ImVec2(200.0f, kPrimaryButtonHeight)))
         {
-            if (isActivityContest_) {
-                isActivityContest_ = false;
-                if (contestResult_.actualTotal > 0) {
-                    Talent::tryAcquireTrait(0.15);
-                }
+            if (Engine::currentContestIsActivity()) {
+                // 活动赛（网赛/刷题/自定义）收尾：特质判定归引擎，回到行动阶段
+                Engine::activityContestFinished(contestResult_.actualTotal);
                 screen_ = GuiScreen::MonthAction;
             } else {
-                ContinueAfterContest();
+                // 官方比赛阶段完成 → 引擎推进到下一阶段（多日赛/考试/结算）
+                Engine::phaseFinished();
+                SyncFromEngine();
             }
         }
     }
@@ -2027,9 +1962,49 @@ namespace
         if (g_fontH1) ImGui::PopFont();
         ImGui::Spacing();
         {
-            std::string sum = BuildEndingSummary();
-            centerText(sum.c_str());
-            ImGui::TextColored(OITheme::Col::TxtDim, "%s", sum.c_str());
+            // 结局矩阵：36 月走完 → OI 高度 × 高考档位；健康归零 → 积劳成疾
+            const Ending::Result er = Engine::gameEndedByCompletion()
+                ? Ending::resolveCompleted36()
+                : Ending::resolveHealthDeath();
+            if (g_fontH1) ImGui::PushFont(g_fontH1);
+            centerText(er.title.c_str());
+            ImGui::PushStyleColor(ImGuiCol_Text, OITheme::Col::LgYellow);
+            ImGui::TextUnformatted(er.title.c_str());
+            ImGui::PopStyleColor();
+            if (g_fontH1) ImGui::PopFont();
+            ImGui::Spacing();
+            ImGui::PushStyleColor(ImGuiCol_Text, OITheme::Col::TxtDim);
+            // 结语按换行拆行，逐行居中
+            {
+                const std::string& s = er.description;
+                size_t pos = 0;
+                while (pos <= s.size()) {
+                    size_t nl = s.find('\n', pos);
+                    std::string seg = s.substr(pos, nl == std::string::npos ? std::string::npos : nl - pos);
+                    if (!seg.empty()) { centerText(seg.c_str()); ImGui::TextUnformatted(seg.c_str()); }
+                    if (nl == std::string::npos) break;
+                    pos = nl + 1;
+                }
+            }
+            ImGui::PopStyleColor();
+
+            // —— 三年大事记时间轴 ——
+            static const char* kMarks[] = {"省队", "集训队", "国家队", "IOI", "保送",
+                                           "一等奖", "金牌", "银牌", "铜牌", "入选", "高考"};
+            std::vector<const std::string*> timeline;
+            for (const auto& lg : gameState.gameLog)
+                for (const char* m : kMarks)
+                    if (lg.find(m) != std::string::npos) { timeline.push_back(&lg); break; }
+            if (!timeline.empty()) {
+                ImGui::Spacing();
+                RenderSection("TIMELINE", "三年大事记");
+                const size_t start = timeline.size() > 8 ? timeline.size() - 8 : 0;
+                for (size_t i = start; i < timeline.size(); ++i) {
+                    ImGui::TextColored(OITheme::Col::Teal, "●");
+                    ImGui::SameLine(0, 6);
+                    ImGui::TextWrapped("%s", timeline[i]->c_str());
+                }
+            }
         }
         ImGui::Spacing();
         ImGui::Spacing();
