@@ -12,6 +12,11 @@ if(MSVC)
     add_compile_options(/utf-8)
 else()
     add_compile_options(-finput-charset=UTF-8 -fexec-charset=UTF-8)
+    if(MINGW)
+        # 静态链接 MinGW 运行时（libgcc/libstdc++/winpthread/mcfthread），
+        # 产物不再依赖 libstdc++-6.dll 等分发 DLL；系统 DLL（UCRT/D3D11 等）仍动态
+        add_link_options(-static -static-libgcc -static-libstdc++)
+    endif()
 endif()
 
 set(IMGUI_SOURCES

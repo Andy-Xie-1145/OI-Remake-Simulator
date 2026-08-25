@@ -26,7 +26,7 @@ if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
 set SOURCES=test_main.cpp test_types.cpp test_game.cpp test_contest.cpp test_engine.cpp test_features.cpp
 set INCLUDES=-I.. -I../imgui
 
-set CXXFLAGS=-std=c++17 -Wall -Wextra -O0 -g
+set CXXFLAGS=-std=c++17 -Wall -Wextra -O0 -g -static -static-libgcc -static-libstdc++
 
 echo [INFO] Compiling test runner...
 %GXX% %CXXFLAGS% %INCLUDES% %SOURCES% -o "%OUTPUT_DIR%\test_runner.exe" 2>&1
