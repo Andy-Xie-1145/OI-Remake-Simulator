@@ -26,6 +26,16 @@ namespace Save {
 constexpr int kSaveVersion = 3;
 constexpr const char* kMagic = "OISAVE";
 
+// ⚠️ 防呆哨兵 ⚠️ --------------------------------------------------------------
+// GameState 新增/删除字段会使 sizeof 变化，下面的 static_assert 将编译失败，
+// 强制你同步以下三处（缺一不可），改完再把数字更新为新 sizeof：
+//   ① Save::serialize() / Save::deserialize()
+//   ② game.hpp 的 initGame() 单局状态重置
+//   ③ tests/test_features.cpp 的「initGame 重置回归」字段污染清单
+static_assert(sizeof(GameState) == 896,
+    "GameState layout changed! Sync 1) Save::serialize/deserialize  "
+    "2) initGame() resets  3) reset regression test, then update this size.");
+
 // ---------- 路径 ----------
 inline std::string savePath() {
     char buf[MAX_PATH] = {0};
@@ -39,6 +49,29 @@ inline std::string savePath() {
 inline bool exists() {
     std::ifstream f(savePath());
     return f.good();
+}
+
+// ---------- 轻量进度探测（不全量反序列化，供「覆盖存档」确认框使用） ----------
+inline bool peekProgress(int& outYear, int& outCalMonth, int& outMonth) {
+    std::ifstream f(savePath());
+    if (!f.good()) return false;
+    std::string magic;
+    int ver = 0;
+    f >> magic >> ver;
+    if (magic != kMagic || ver > kSaveVersion) return false;
+
+    bool hasMonth = false, hasYear = false, hasCal = false;
+    std::string line;
+    while (std::getline(f, line)) {
+        size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        const std::string k = line.substr(0, eq), v = line.substr(eq + 1);
+        if (k == "g.month")      { outMonth    = std::atoi(v.c_str()); hasMonth = true; }
+        else if (k == "g.year")  { outYear     = std::atoi(v.c_str()); hasYear = true; }
+        else if (k == "g.calMonth") { outCalMonth = std::atoi(v.c_str()); hasCal = true; }
+        if (hasMonth && hasYear && hasCal) break;   // 三个键都在文件头部
+    }
+    return hasMonth;
 }
 
 // ---------- 序列化 ----------
@@ -364,11 +397,48 @@ inline bool deserialize(const std::string& text) {
     return true;
 }
 
+// ---------- 读入校验：拒绝非法状态（防呆④） ----------
+// deserialize 宽松填充默认值，这里把关键不变量兜住；失败即视为存档损坏。
+inline bool validateLoaded() {
+    if (gameState.currentMonth < 1 || gameState.currentMonth > 36) return false;
+    if (gameState.currentYear != monthToYear(gameState.currentMonth)) return false;
+    if (gameState.calendarMonth != monthToCalendarMonth(gameState.currentMonth)) return false;
+    if (gameState.health < 0 || gameState.health > 20) return false;
+    if (gameState.mood < 0) return false;
+    if (gameState.moodCap < 8 || gameState.moodCap > 24) return false;
+    if (gameState.ap < 0 || gameState.maxAp < gameState.ap) return false;
+    if (gameState.money < 0) return false;
+    if (!DIFFICULTY_SETTINGS.count(gameState.gameDifficulty)) return false;
+    return true;
+}
+
 inline bool write() {
-    std::ofstream f(savePath(), std::ios::trunc);
-    if (!f.good()) return false;
-    f << serialize();
-    return f.good();
+    // 防呆③：只在月度行动阶段存档。阶段队列非空 = 比赛/考试进行中，状态不完整。
+    if (Engine::hasPhase()) {
+        logEvent("警告：当前处于比赛/考试流程中，已跳过自动存档", "event");
+        return false;
+    }
+
+    // 防呆⑤：原子写——先写临时文件并校验魔数，再替换正式档，中途崩溃不会毁掉旧档
+    const std::string tmpPath = savePath() + ".tmp";
+    {
+        std::ofstream f(tmpPath, std::ios::trunc);
+        if (!f.good()) return false;
+        f << serialize();
+        f.flush();
+        if (!f.good()) { f.close(); std::remove(tmpPath.c_str()); return false; }
+    }
+    {
+        std::ifstream chk(tmpPath);
+        std::string magic; int ver = 0;
+        chk >> magic >> ver;
+        if (magic != kMagic || ver > kSaveVersion) {
+            chk.close(); std::remove(tmpPath.c_str()); return false;
+        }
+    }
+    std::remove(savePath().c_str());           // Windows rename 不覆盖已存在目标
+    if (std::rename(tmpPath.c_str(), savePath().c_str()) != 0) return false;
+    return true;
 }
 
 inline bool read() {
@@ -376,7 +446,18 @@ inline bool read() {
     if (!f.good()) return false;
     std::ostringstream ss;
     ss << f.rdbuf();
-    return deserialize(ss.str());
+
+    // 防呆④：先在备份上尝试，校验失败则原样恢复现场，绝不让玩家状态变成半残
+    GameState backup = gameState;
+    const size_t cursorBackup = Engine::debugCursor();
+    (void)cursorBackup;
+    if (!deserialize(ss.str()) || !validateLoaded()) {
+        gameState = backup;
+        // 引擎阶段队列同样恢复：清空即可回到「行动阶段」语义（备份时必为空）
+        Engine::hardReset();
+        return false;
+    }
+    return true;
 }
 
 inline void erase() {

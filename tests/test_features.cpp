@@ -119,6 +119,54 @@ TEST_CASE("save - 魔数不符时拒绝读取", "[save]")
     REQUIRE_FALSE(Save::deserialize("OISAVE 999\nver=999\n"));
 }
 
+TEST_CASE("save - 行动阶段守卫：阶段队列非空时拒绝写档", "[save]")
+{
+    Utils::setSeed(11);
+    freshGame();
+    REQUIRE(Save::write());                    // 行动阶段：允许
+
+    gameState.playerStats.cspScore = 250;
+    for (int m = 1; m < 5; ++m) {              // 推进到第 5 月
+        Engine::endMonthActions();
+        while (Engine::hasPhase()) Engine::phaseFinished();
+    }
+    Engine::endMonthActions();                 // 产生 比赛→结算 阶段队列
+    REQUIRE(Engine::hasPhase());
+    CHECK_FALSE(Save::write());                // 防呆③：比赛中途禁止落盘
+
+    while (Engine::hasPhase()) Engine::phaseFinished();
+    CHECK(Save::write());                      // 回到行动阶段恢复允许
+}
+
+TEST_CASE("save - 损坏存档被整体拒绝且现场不变（防呆④）", "[save]")
+{
+    Utils::setSeed(11);
+    freshGame();
+    gameState.money = 555;                     // 金丝雀
+
+    const std::string bad = std::string(Save::kMagic) + " 3\nver=3\ng.month=0\n";
+    { std::ofstream f(Save::savePath(), std::ios::trunc); f << bad; }
+
+    CHECK_FALSE(Save::read());                 // month=0 违反不变量 → 整体拒绝
+    CHECK(gameState.money == 555);             // 现场未被半残状态污染
+}
+
+TEST_CASE("save - peekProgress 读取进度摘要（不全量反序列化）", "[save]")
+{
+    Utils::setSeed(11);
+    freshGame();
+    gameState.currentMonth = 14;
+    gameState.currentYear = 2;
+    gameState.calendarMonth = 8;
+    REQUIRE(Save::write());
+
+    int y = 0, c = 0, m = 0;
+    REQUIRE(Save::peekProgress(y, c, m));
+    CHECK(y == 2);
+    CHECK(c == 8);
+    CHECK(m == 14);
+}
+
 // ============================ C · 结局矩阵与保送 ============================
 
 namespace {

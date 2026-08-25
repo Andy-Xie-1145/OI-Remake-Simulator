@@ -59,7 +59,7 @@ namespace
         GameOver
     };
 
-    constexpr const char *kGameVersion = "v0.3.0";
+    constexpr const char *kGameVersion = "v0.3.1";
     constexpr const char *kIntroStoryText =
         "我重生了？\n"
         "参加完省队选拔后，你意识到自己无缘省队了。也许从此就和 OI 无缘了。\n\n"
@@ -249,6 +249,8 @@ namespace
         int activitySubMenu_ = -1;   // -1=主菜单, 0=Learn, 1=网赛, 2=刷题, 3=自定义比赛
         int customTemplateIdx_ = -1; // 自定义比赛选中的模板索引
         bool showShop_ = false;      // 商店弹窗
+        bool confirmNewGame_ = false; // 防呆①：有存档时开新局需确认覆盖
+        int savePeekYear_ = 1, savePeekCalMonth_ = 7, savePeekMonth_ = 1;
 
         void ResetToHome();
         int TalentBudget() const;
@@ -648,7 +650,41 @@ namespace
         const float btnWidth = 240.0f;
         ImGui::SetCursorPosX((ww - btnWidth) * 0.5f);
         if (OIWidgets::PrimaryButton("开始游戏  →", ImVec2(btnWidth, kPrimaryButtonHeight)))
-            screen_ = GuiScreen::Difficulty;
+        {
+            // 防呆①：存在未完成存档时，先确认再覆盖
+            if (Save::exists() && Save::peekProgress(savePeekYear_, savePeekCalMonth_, savePeekMonth_))
+                confirmNewGame_ = true;
+            else
+                screen_ = GuiScreen::Difficulty;
+        }
+
+        // —— 覆盖存档确认弹窗 ——
+        if (confirmNewGame_)
+        {
+            ImGui::OpenPopup("覆盖存档确认");
+            if (ImGui::BeginPopupModal("覆盖存档确认", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                char buf[128];
+                snprintf(buf, sizeof buf,
+                         "检测到未完成的存档（第 %d 年 %s，第 %d / 36 月）。\n开始新游戏将永久覆盖它，确定继续吗？",
+                         savePeekYear_, getCalendarMonthName(savePeekCalMonth_), savePeekMonth_);
+                ImGui::TextWrapped("%s", buf);
+                ImGui::Spacing();
+                if (OIWidgets::PrimaryButton("仍然开始新游戏", ImVec2(200, kPrimaryButtonHeight)))
+                {
+                    confirmNewGame_ = false;
+                    ImGui::CloseCurrentPopup();
+                    screen_ = GuiScreen::Difficulty;
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("取消", ImVec2(120, kPrimaryButtonHeight)))
+                {
+                    confirmNewGame_ = false;
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            }
+        }
 
         // 检测到存档 → 提供继续入口
         if (Save::exists())
