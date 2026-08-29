@@ -106,9 +106,9 @@ inline void startMonth(int month) {
     if (gameState.isAoYe) baseAp += 2;
     baseAp += settings.apBonus;
 
-    // 停课扣心态
+    // 停课扣心态（教练关系 ≥40 时减轻）
     if (gameState.isTingke) {
-        applyStatDelta("mood", -3, "停课");
+        applyStatDelta("mood", -(gameState.coachRelation >= 40 ? 2 : 3), "停课");
     }
 
     // 病倒静养：本月行动力 -2、心态 -1（一次性消费，不可清除）

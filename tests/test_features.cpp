@@ -35,6 +35,146 @@ TEST_CASE("topic - 已精通的专题不可再次接受（防重复刷取）", "
         CHECK(std::strlen(Topics::RewardText(t)) > 0);
 }
 
+// ============================ A · 机房伙伴与宿敌 ============================
+
+TEST_CASE("social - 开局生成：3 位伙伴姓名/专精/效果互异", "[social]")
+{
+    Utils::setSeed(33);
+    freshGame();
+    REQUIRE(gameState.companions.size() == 3);
+
+    std::set<std::string> names;
+    std::set<int> dims, perks;
+    for (const auto& c : gameState.companions)
+    {
+        CHECK_FALSE(c.name.empty());
+        names.insert(c.name);
+        dims.insert(c.dimIndex);
+        perks.insert(c.perkId);
+        CHECK((c.relation >= 10 && c.relation <= 25));
+        CHECK_FALSE(c.gone);
+    }
+    CHECK(names.size() == 3);   // 姓名不重复
+    CHECK(dims.size() == 3);    // 专精互异
+    CHECK(perks.size() == 3);   // 挚友效果互异
+
+    CHECK_FALSE(gameState.rival.name.empty());
+    CHECK((gameState.rival.baseFactor >= 0.90 && gameState.rival.baseFactor <= 1.15));
+
+    // 效果揭示：初始关系 <40 → 全部未揭示
+    for (const auto& c : gameState.companions)
+        CHECK(Social::tierOf(c.relation) == 0);
+}
+
+TEST_CASE("social - 闲聊：关系成长与挚友效果生效", "[social]")
+{
+    Utils::setSeed(5);
+    freshGame();
+    REQUIRE_FALSE(gameState.companions.empty());
+    auto& c = gameState.companions[0];
+    const int perkId = c.perkId;
+    c.relation = 39;
+
+    // 未达挚友 → 效果不生效
+    CHECK_FALSE(Social::hasFriendPerk((SocialPerk)perkId));
+
+    // 反复闲聊直到跨过挚友线（每次 +4~7）
+    int guard = 0;
+    while (gameState.companions[0].relation < Social::REL_FRIEND && guard++ < 30)
+    {
+        REQUIRE(gameState.ap >= 1);
+        auto out = Engine::doActivity(Activity::Socialize, 0);
+        REQUIRE(out.ok);
+    }
+    CHECK(gameState.companions[0].relation >= Social::REL_FRIEND);
+    CHECK(Social::hasFriendPerk((SocialPerk)perkId));   // 挚友效果生效
+
+    // 已退环境伙伴：闲聊无效且效果失效
+    gameState.companions[0].gone = true;
+    CHECK(Social::chat(0)[0].find("不在机房") != std::string::npos);
+    CHECK_FALSE(Social::hasFriendPerk((SocialPerk)perkId));
+}
+
+TEST_CASE("social - 知己倾诉：清焦虑且每学年一次", "[social]")
+{
+    Utils::setSeed(5);
+    freshGame();
+    auto& c = gameState.companions[0];
+    c.relation = Social::REL_CONFIDANT;   // 知己
+    gameState.isAnxious = true;
+    gameState.anxietyMonths = 2;
+
+    auto out = Engine::doActivity(Activity::Socialize, 0);
+    REQUIRE(out.ok);
+    bool vented = false;
+    for (const auto& lg : out.activity.logs)
+        if (lg.find("倾诉") != std::string::npos) vented = true;
+    CHECK(vented);
+    CHECK_FALSE(gameState.isAnxious);
+    CHECK(c.ventUsedThisYear);
+
+    // 再次焦虑后本学年无法倾诉
+    gameState.isAnxious = true;
+    out = Engine::doActivity(Activity::Socialize, 0);
+    vented = false;
+    for (const auto& lg : out.activity.logs)
+        if (lg.find("倾诉") != std::string::npos) vented = true;
+    CHECK_FALSE(vented);
+    CHECK(gameState.isAnxious);
+
+    // 学年过渡重置
+    Social::onYearTransition(2);
+    CHECK_FALSE(c.ventUsedThisYear);
+}
+
+TEST_CASE("social - 宿敌胜负结算（含知耻后勇）", "[social]")
+{
+    Utils::setSeed(9);
+    freshGame();
+
+    // 大胜：actual 远超 expected×1.25 上界
+    Contest::ContestResultView win;
+    win.contestName = "CSP-S";
+    win.expectedTotal = 100;
+    win.actualTotal = 200;
+    const int moodBeforeWin = gameState.mood;
+    Social::onOfficialContestFinished(win);
+    CHECK(gameState.mood == moodBeforeWin + 1);
+    CHECK(gameState.rivalryMonths == 0);
+    CHECK(gameState.rival.lastNote.find("vs ") == 0);
+
+    // 大败：0 分对预期 100 分
+    Contest::ContestResultView lose;
+    lose.contestName = "NOIP";
+    lose.expectedTotal = 100;
+    lose.actualTotal = 0;
+    const int moodBeforeLose = gameState.mood;
+    Social::onOfficialContestFinished(lose);
+    CHECK(gameState.mood == std::max(0, moodBeforeLose - 2));
+    CHECK(gameState.rivalryMonths == 2);      // 知耻后勇启动
+
+    // 月末递减（endMonthActions 内 Social::onMonthEnd）
+    Engine::endMonthActions();
+    CHECK(gameState.rivalryMonths == 1);
+}
+
+TEST_CASE("social - 高三扰动：退环境后至少留一人", "[social]")
+{
+    bool sawDeparture = false;
+    for (int seed = 0; seed < 400 && !sawDeparture; ++seed)
+    {
+        Utils::setSeed((unsigned)seed);
+        freshGame();                 // freshGame 内含 generateRoster
+        Social::onYearTransition(3); // 直接触发高三扰动
+        int alive = 0, gone = 0;
+        for (const auto& c : gameState.companions)
+            c.gone ? ++gone : ++alive;
+        REQUIRE(alive >= 1);         // 核心不变量：至少一人留下
+        if (gone > 0) sawDeparture = true;
+    }
+    CHECK(sawDeparture);             // 400 个种子内必然观察到扰动生效
+}
+
 // ============================ 状态重置 ============================
 
 TEST_CASE("initGame - 重开时清理全部 v0.3.0 状态（回归：专题/熬夜/病倒残留）", "[reset]")
@@ -52,6 +192,14 @@ TEST_CASE("initGame - 重开时清理全部 v0.3.0 状态（回归：专题/熬�
     gameState.sickNext = true;
     gameState.exerciseCountThisMonth = 3;
 
+    // v0.4.0 社交残留
+    Social::generateRoster();
+    gameState.companions[0].relation = 90;
+    gameState.companions[1].gone = true;
+    gameState.coachRelation = 88;
+    gameState.rival.name = "测试宿敌";
+    gameState.rivalryMonths = 2;
+
     // 「开始新游戏」路径：不经存档，BeginSetup -> initGame
     Engine::hardReset();
     initGame();
@@ -66,6 +214,12 @@ TEST_CASE("initGame - 重开时清理全部 v0.3.0 状态（回归：专题/熬�
     CHECK_FALSE(gameState.isAoYe);
     CHECK_FALSE(gameState.sickNext);
     CHECK(gameState.exerciseCountThisMonth == 0);
+
+    // 社交状态已由新局随机生成覆盖（非残留）
+    CHECK(gameState.companions.size() == 3);
+    CHECK(gameState.coachRelation == 20);     // initGame 重置后再生成不影响教练
+    CHECK_FALSE(gameState.rival.name == "测试宿敌");
+    CHECK(gameState.rivalryMonths == 0);
 
     // 新一局首个结算不得误判专题逾期扣心态
     Engine::endMonthActions();
@@ -97,6 +251,17 @@ TEST_CASE("save - 写入后读回，关键字段一致", "[save]")
     gameState.lastStudyMonth["dp"] = 4;
     logEvent("测试日志一行", "event");
 
+    // 社交字段
+    REQUIRE(gameState.companions.size() == 3);
+    gameState.companions[0].name = "陈默";
+    gameState.companions[0].relation = 66;
+    gameState.companions[0].gone = true;
+    gameState.coachRelation = 55;
+    gameState.rival.name = "方哲宇";
+    gameState.rival.baseFactor = 1.05;
+    gameState.rival.lastNote = "vs 方哲宇 80 分，你 120 分";
+    gameState.rivalryMonths = 2;
+
     REQUIRE(Save::write());
 
     // 破坏现场后读回
@@ -120,6 +285,17 @@ TEST_CASE("save - 写入后读回，关键字段一致", "[save]")
     CHECK(gameState.exerciseCountThisMonth == 2);
     CHECK(gameState.currentShopPrices["思维提升"] == 123);
     CHECK(gameState.lastStudyMonth["dp"] == 4);
+
+    // 社交字段往返
+    REQUIRE(gameState.companions.size() == 3);
+    CHECK(gameState.companions[0].name == "陈默");
+    CHECK(gameState.companions[0].relation == 66);
+    CHECK(gameState.companions[0].gone == true);
+    CHECK(gameState.coachRelation == 55);
+    CHECK(gameState.rival.name == "方哲宇");
+    CHECK(gameState.rival.baseFactor == Approx(1.05).margin(0.0001));
+    CHECK(gameState.rival.lastNote == "vs 方哲宇 80 分，你 120 分");
+    CHECK(gameState.rivalryMonths == 2);
 
     bool foundLog = false;
     for (const auto& lg : gameState.gameLog)

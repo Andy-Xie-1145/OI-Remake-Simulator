@@ -321,6 +321,32 @@ struct SettlementFact {
     std::string text;   // 人类可读文案（仅用于展示）
 };
 
+// ========== 社交系统：机房伙伴 / 教练 / 宿敌 ==========
+
+// 挚友效果池（关系 ≥40 时生效；生成时随机分配、同局互不重复）
+enum class SocialPerk {
+    CodeReview = 0,   // 代码复查：比赛中「代码bug」事件概率 ×0.7
+    Inspiration = 1,  // 灵感碰撞：「灵光一闪」事件概率 +1%
+    Notebook = 2,     // 错题本：修改代码所需次数 -1（下限 1）
+    StudyBuddy = 3,   // 补习互助：学文化课时文化课收益额外 +1
+    MoodAnchor = 4,   // 心态锚：焦虑发作概率 ×0.85
+};
+
+struct CompanionNpc {
+    std::string name;
+    int dimIndex = 0;          // 专精知识维度（KNOWLEDGE_DIMS 下标）
+    int relation = 0;          // 关系值 0..100
+    int perkId = -1;           // SocialPerk 枚举值
+    bool gone = false;         // 高三扰动退环境（关系冻结、效果失效）
+    bool ventUsedThisYear = false;  // 知己「倾诉」每学年一次
+};
+
+struct RivalState {
+    std::string name;
+    double baseFactor = 1.0;   // 强度系数（开局在 0.90~1.15 固定）
+    std::string lastNote;      // 最近一场对比播报（持久化，宿敌卡片展示）
+};
+
 // ========== 游戏全局状态 ==========
 
 struct GameState {
@@ -365,6 +391,12 @@ struct GameState {
     std::string background;                     // 已选背景 ID
     std::map<std::string, int> ownedItems;      // 拥有物品及数量
     double cultureEfficiency = 1.0;             // 文化课效率乘数（跨年加权）
+
+    // 社交系统（v0.4.0）
+    std::vector<CompanionNpc> companions;  // 机房伙伴（开局随机生成 3 位）
+    int coachRelation = 20;                // 教练关系 0..100
+    RivalState rival;                      // 宿敌
+    int rivalryMonths = 0;                 // 「知耻后勇」剩余月数（输给宿敌后 ×1.1）
 
     // 月度结算临时数据
     std::vector<SettlementFact> settlementFacts;  // 本月结算事实（类型化）

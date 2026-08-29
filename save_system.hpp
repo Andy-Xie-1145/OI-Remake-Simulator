@@ -32,7 +32,7 @@ constexpr const char* kMagic = "OISAVE";
 //   ① Save::serialize() / Save::deserialize()
 //   ② game.hpp 的 initGame() 单局状态重置
 //   ③ tests/test_features.cpp 的「initGame 重置回归」字段污染清单
-static_assert(sizeof(GameState) == 896,
+static_assert(sizeof(GameState) == 1008,
     "GameState layout changed! Sync 1) Save::serialize/deserialize  "
     "2) initGame() resets  3) reset regression test, then update this size.");
 
@@ -205,6 +205,21 @@ inline std::string serialize() {
     i = 0;
     for (int mt : gameState.masteredTopics)
         put(o, "g.mastered." + std::to_string(i++), mt);
+    i = 0;
+    for (const auto& c : gameState.companions) {
+        const std::string p = "g.comp." + std::to_string(i++) + ".";
+        put(o, p + "name", esc(c.name));
+        put(o, p + "dim", c.dimIndex);
+        put(o, p + "rel", c.relation);
+        put(o, p + "perk", c.perkId);
+        put(o, p + "gone", c.gone);
+        put(o, p + "vent", c.ventUsedThisYear);
+    }
+    put(o, "g.coachRel", gameState.coachRelation);
+    put(o, "g.rivalName", esc(gameState.rival.name));
+    put(o, "g.rivalFactor", gameState.rival.baseFactor);
+    put(o, "g.rivalNote", esc(gameState.rival.lastNote));
+    put(o, "g.rivalryMonths", gameState.rivalryMonths);
     const auto& notice = gameState.pendingContestNotice;
     put(o, "g.notice.active", notice.active);
     put(o, "g.notice.title", esc(notice.title));
@@ -338,6 +353,28 @@ inline bool deserialize(const std::string& text) {
         else if (k.rfind("g.lsm.", 0) == 0)      gameState.lastStudyMonth[k.substr(6)] = std::atoi(v.c_str());
         else if (k.rfind("g.mastered.", 0) == 0) gameState.masteredTopics.insert(std::atoi(v.c_str()));
     }
+    // 伙伴（定长 3 位，按索引恢复）
+    gameState.companions.assign(3, CompanionNpc{});
+    for (const auto& [k, v] : kv) {
+        if (k.rfind("g.comp.", 0) != 0) continue;
+        const size_t dot = k.find('.', 7);
+        if (dot == std::string::npos) continue;
+        const int idx = std::atoi(k.substr(7, dot - 7).c_str());
+        const std::string field = k.substr(dot + 1);
+        if (idx < 0 || idx >= (int)gameState.companions.size()) continue;
+        auto& c = gameState.companions[idx];
+        if (field == "name") c.name = detail::unesc(v);
+        else if (field == "dim") c.dimIndex = std::atoi(v.c_str());
+        else if (field == "rel") c.relation = std::atoi(v.c_str());
+        else if (field == "perk") c.perkId = std::atoi(v.c_str());
+        else if (field == "gone") c.gone = (v == "1");
+        else if (field == "vent") c.ventUsedThisYear = (v == "1");
+    }
+    gameState.coachRelation = getI("g.coachRel", 20);
+    gameState.rival.name = getS("g.rivalName");
+    gameState.rival.baseFactor = getD("g.rivalFactor", 1.0);
+    gameState.rival.lastNote = getS("g.rivalNote");
+    gameState.rivalryMonths = getI("g.rivalryMonths");
     gameState.examRecords.clear();
     for (int j = 0;; ++j) {
         std::string p = "g.exam." + std::to_string(j) + ".";

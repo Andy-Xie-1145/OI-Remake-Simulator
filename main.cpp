@@ -59,7 +59,7 @@ namespace
         GameOver
     };
 
-    constexpr const char *kGameVersion = "v0.3.1";
+    constexpr const char *kGameVersion = "v0.4.0-beta";
     constexpr const char *kIntroStoryText =
         "我重生了？\n"
         "参加完省队选拔后，你意识到自己无缘省队了。也许从此就和 OI 无缘了。\n\n"
@@ -316,6 +316,10 @@ namespace
         size_t snapAchCount_ = 0;
         std::set<int> snapMastered_;
         bool snapBaosong_ = false, snapAnxious_ = false, snapSick_ = false;
+        int snapTier_[3] = {0, 0, 0};      // 每位伙伴的关系层级（同学/挚友/知己）
+        bool snapGone_[3] = {false, false, false};
+        int snapCoach_ = 20;
+        int snapRivalry_ = 0;
         void SyncToastSnapshot();
         void DiffToast();
 
@@ -492,6 +496,13 @@ namespace
         snapBaosong_ = gameState.playerStats.isBaosong;
         snapAnxious_ = gameState.isAnxious;
         snapSick_ = gameState.sickNext;
+        for (int i = 0; i < 3 && i < (int)gameState.companions.size(); ++i)
+        {
+            snapTier_[i] = Social::tierOf(gameState.companions[i].relation);
+            snapGone_[i] = gameState.companions[i].gone;
+        }
+        snapCoach_ = gameState.coachRelation;
+        snapRivalry_ = gameState.rivalryMonths;
         toastSnapValid_ = true;
     }
 
@@ -544,9 +555,35 @@ namespace
             snapAchCount_ = ps.achievements.size();
         }
 
-        snapBaosong_ = ps.isBaosong;
-        snapAnxious_ = gameState.isAnxious;
-        snapSick_ = gameState.sickNext;
+        // —— 社交：关系层级跃迁 / 退环境 / 教练阈值 / 知耻后勇 ——
+        for (int i = 0; i < (int)gameState.companions.size() && i < 3; ++i)
+        {
+            const auto &c = gameState.companions[i];
+            if (!c.gone)
+            {
+                const int tNow = Social::tierOf(c.relation);
+                if (tNow > snapTier_[i] && tNow >= 1)
+                    PushToast(std::string("关系升级 · ") + c.name,
+                              std::string(Social::tierName(tNow)) +
+                                  (tNow == 2 ? " · 解锁「倾诉」" : " · 挚友效果已生效"),
+                              OITheme::Col::Info, 6.0f);
+            }
+            else if (!snapGone_[i])
+            {
+                PushToast(std::string("退环境 · ") + c.name,
+                          "高三转去了文化班，挚友效果随之失效",
+                          OITheme::Col::TxtDim, 6.0f);
+            }
+            snapTier_[i] = Social::tierOf(c.relation);
+            snapGone_[i] = c.gone;
+        }
+        if (snapCoach_ < 70 && gameState.coachRelation >= 70)
+            PushToast("教练特训解锁", "集训效果增强 · 停课惩罚减轻", OITheme::Col::Warn, 6.0f);
+        snapCoach_ = gameState.coachRelation;
+        if (gameState.rivalryMonths > snapRivalry_)
+            PushToast("知耻后勇", "输给 " + gameState.rival.name +
+                          " · 2 个月内学习效率 ×1.1", OITheme::Col::Warn, 6.0f);
+        snapRivalry_ = gameState.rivalryMonths;
     }
 
     void GuiApp::FinalizeContest()
@@ -941,7 +978,7 @@ namespace
     {
         RenderPageHeader("帮助", "这里汇总了开局、训练、比赛和关键机制的说明。右侧边栏也会根据当前界面给出速查提示。");
 
-        static const struct { const char* title; const char* items[11]; int count; } helpSections[] = {
+        static const struct { const char* title; const char* items[14]; int count; } helpSections[] = {
             {"流程概览", {"首页 -> 难度选择 -> 剧情与背景 -> 天赋分配 -> 36 月回合制。",
                            "每月有 AP（行动力），用于学习、打网赛、刷题、学文化课、休息等。",
                            "比赛月在活动结束后自动进入比赛；考试月在比赛后进行文化课考试。",
@@ -969,14 +1006,17 @@ namespace
             {"关键机制", {"心态（0-14）：影响学习效率，低于 4 连续 2 月可能触发焦虑。",
                            "健康（0-20）：归零则游戏结束。注意休息。",
                            "遗忘：连续 2 月未学习的知识维度会 -1。",
-                           "停课：每月+2 AP，但心态-3，不能学文化课。",
+                           "停课：每月+2 AP，但心态-3（教练关系≥40 时 -2），不能学文化课。",
                            "熬夜：本月+2 AP，但结算健康-3、焦虑概率×1.3；与停课互斥。",
                            "体育锻炼（1 AP）：健康+2；本月锻炼≥2次 → 病倒概率减半。",
                            "病倒：健康≤4 时月末有概率发生，下月行动力-2、心态-1。",
                            "专题任务：3 个月内完成 4 次匹配行动 → 该维度永久精通（思考时间-1）。",
                            "保送：入选国家集训队后文化课压力免除，高考替换为庆功月。",
+                           "机房伙伴：闲聊提升关系；挚友（≥40）解锁专属效果，知己（≥85）可倾诉清焦虑。",
+                           "教练：获奖/参训提升关系；停课惩罚减轻，≥70 解锁特训集训。",
+                           "宿敌：每场正式比赛对比播报；输了他会知耻后勇（效率×1.1 两月）。",
                            "特质：从模拟赛/刷题中有概率获得，最多 4 个。",
-                           "背景：开局选择，影响心态上限、学习效率、焦虑概率等。"}, 11},
+                           "背景：开局选择，影响心态上限、学习效率、焦虑概率等。"}, 14},
             {"属性速览", {"9 维知识：DP / DS / 字符串 / 图论 / 组合计数 / 数学 / 几何 / 高级DS / 构造",
                            "思维：影响思考成功率。代码：影响写代码成功率。",
                            "细心：降低对拍翻车概率。迅捷：降低写代码耗时。",
@@ -1249,6 +1289,109 @@ namespace
                             OIWidgets::Tag(d->name, OITheme::Col::Ok);
                         }
                 }
+            }
+        }
+        OIWidgets::EndCard();
+
+        // —— 机房 · 人际（伙伴 / 教练 / 宿敌）——
+        if (OIWidgets::BeginCard("social_card", ImVec2(0, 0)))
+        {
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextColored(OITheme::Col::TxtFaint, "机房 · 人际");
+            if (!gameState.rival.lastNote.empty())
+            {
+                ImGui::SameLine(0, 14);
+                ImGui::PushStyleColor(ImGuiCol_Text, OITheme::Col::TxtDim);
+                ImGui::TextWrapped("%s", gameState.rival.lastNote.c_str());
+                ImGui::PopStyleColor();
+            }
+            if (gameState.rivalryMonths > 0)
+            {
+                char rb[48];
+                snprintf(rb, sizeof rb, "知耻后勇 ×1.1（剩 %d 月）", gameState.rivalryMonths);
+                ImGui::SameLine(0, 10);
+                OIWidgets::Tag(rb, OITheme::Col::Warn);
+            }
+            ImGui::Spacing();
+
+            const bool canChat = Engine::canDoActivity(Activity::Socialize);
+            for (int i = 0; i < (int)gameState.companions.size(); ++i)
+            {
+                const auto &c = gameState.companions[i];
+                ImGui::PushID(i);
+                if (c.gone)
+                {
+                    ImGui::TextColored(OITheme::Col::TxtFaint, "%s（已退环境）", c.name.c_str());
+                    ImGui::PopID();
+                    continue;
+                }
+                const int tier = Social::tierOf(c.relation);
+                ImGui::AlignTextToFramePadding();
+                ImGui::Text("%s", c.name.c_str());
+                {
+                    const std::string dimTag = Utils::getStatName(KNOWLEDGE_DIMS[c.dimIndex]);
+                    ImGui::SameLine(0, 8);
+                    OIWidgets::Tag(dimTag.c_str(), OITheme::Col::Teal);
+                }
+                if (tier >= 1)
+                {
+                    ImGui::SameLine(0, 4);
+                    OIWidgets::Tag(Social::tierName(tier), tier == 2 ? OITheme::Col::LgYellow : OITheme::Col::Info);
+                }
+                ImGui::SameLine(0, 8);
+                OIWidgets::Bar(c.relation / 100.0f, ImVec2(120.0f, 6.0f),
+                               tier >= 1 ? OITheme::Col::Info : OITheme::Col::Teal);
+                ImGui::SameLine(0, 6);
+                ImGui::TextColored(OITheme::Col::TxtDim, "%d", c.relation);
+
+                // 效果揭示：挚友 ≥40 显示效果名，悬停看说明；知己层提示倾诉
+                ImGui::SameLine(0, 12);
+                ImGui::AlignTextToFramePadding();
+                if (tier >= 1)
+                {
+                    OIWidgets::Tag(Social::perkName(c.perkId), OITheme::Col::Ok);
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("挚友效果：%s%s",
+                                          Social::perkDesc(c.perkId).c_str(),
+                                          tier >= 2 ? "\n知己：焦虑时可倾诉（每学年一次）" : "");
+                    if (tier >= 2)
+                    {
+                        ImGui::SameLine(0, 6);
+                        ImGui::TextColored(OITheme::Col::TxtFaint,
+                                           c.ventUsedThisYear ? "倾诉已用（本学年）" : "倾诉可用");
+                    }
+                }
+                else
+                {
+                    ImGui::TextColored(OITheme::Col::TxtFaint, "挚友效果 ???（关系 ≥40 揭示）");
+                }
+
+                ImGui::SameLine(0, 12);
+                ImGui::BeginDisabled(!canChat);
+                if (ImGui::SmallButton("闲聊"))
+                    Engine::doActivity(Activity::Socialize, i);
+                ImGui::EndDisabled();
+                ImGui::PopID();
+            }
+
+            // 教练行
+            ImGui::Separator();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("教练");
+            ImGui::SameLine(0, 12);
+            OIWidgets::Bar(gameState.coachRelation / 100.0f, ImVec2(120.0f, 6.0f),
+                           gameState.coachRelation >= 70 ? OITheme::Col::LgYellow : OITheme::Col::Teal);
+            ImGui::SameLine(0, 6);
+            ImGui::TextColored(OITheme::Col::TxtDim, "%d", gameState.coachRelation);
+            if (gameState.coachRelation >= 40)
+            {
+                ImGui::SameLine(0, 10);
+                OIWidgets::Tag("停课减罚", OITheme::Col::Info);
+            }
+            if (gameState.coachRelation >= 70)
+            {
+                ImGui::SameLine(0, 4);
+                OIWidgets::Tag("特训解锁", OITheme::Col::LgYellow);
             }
         }
         OIWidgets::EndCard();

@@ -8,7 +8,7 @@
 
 namespace Activity {
 
-enum Type { Learn, MockContest, CustomContest, Practice, StudyCulture, Rest, SummerCamp, Exercise };
+enum Type { Learn, MockContest, CustomContest, Practice, StudyCulture, Rest, SummerCamp, Exercise, Socialize };
 
 struct ActivityDef {
     Type type;
@@ -28,6 +28,7 @@ inline const std::vector<ActivityDef> ACTIVITY_DEFS = {
     {Rest,          "休息",         2, 1, "健康+3, 心态+2"},
     {SummerCamp,    "参加集训",     4, 0, "高强度训练，知识+2，健康-2，心态-1"},
     {Exercise,      "体育锻炼",     1, 0, "健康+2；本月锻炼≥2次 → 病倒概率减半"},
+    {Socialize,     "机房闲聊",     1, 0, "与伙伴闲聊：关系+4~7，30% 触发小增益"},
 };
 
 inline const ActivityDef& defOf(Type t) {
@@ -76,6 +77,7 @@ inline std::vector<ActivityDef> getAvailable() {
     std::vector<ActivityDef> list;
     for (const auto& d : ACTIVITY_DEFS) {
         if (d.type == CustomContest) continue;  // 自定义赛走独立 Tab，不进底部按钮列表
+        if (d.type == Socialize) continue;      // 闲聊入口在「机房 · 人际」卡片内
         if (d.type == StudyCulture && gameState.isTingke) continue;  // 停课禁文化课
         list.push_back(d);
     }
@@ -156,6 +158,12 @@ inline ActivityResult execute(Type type, int param = 0) {
         double eff = gameState.cultureEfficiency;
         int cultureGain = static_cast<int>(2 * getStudyEfficiency() * eff);
         cultureGain = std::max(1, cultureGain);
+        // 补习互助（伙伴挚友效果）：文化课收益额外 +1
+        for (const auto& c : gameState.companions)
+            if (!c.gone && c.relation >= 40 && c.perkId == (int)SocialPerk::StudyBuddy) {
+                cultureGain += 1;
+                break;
+            }
         applyStatDelta("culture", cultureGain, "学文化课");
         result.logs.push_back("文化课 +" + std::to_string(cultureGain) +
             "（效率" + std::to_string(static_cast<int>(eff * 100)) + "%）");
@@ -220,6 +228,15 @@ inline ActivityResult execute(Type type, int param = 0) {
     case Exercise: {
         applyStatDelta("health", 2, "体育锻炼");
         result.logs.push_back("健康 +2（出一身汗，神清气爽）");
+        break;
+    }
+
+    case Socialize: {
+        // 与伙伴闲聊（param = companions 下标）；具体规则在 Social::chat
+        auto logs2 = Social::chat(param);
+        for (const auto& lg : logs2) result.logs.push_back(lg);
+        if (logs2.empty())
+            result.logs.push_back("机房里没人理你……");
         break;
     }
     }

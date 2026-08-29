@@ -133,6 +133,12 @@ inline void initGame() {
     gameState.sickNext = false;
     gameState.exerciseCountThisMonth = 0;
 
+    // v0.4.0 社交状态重置（伙伴名单由开局随机生成，见 Social::generateRoster）
+    gameState.companions.clear();
+    gameState.coachRelation = 20;
+    gameState.rival = RivalState{};
+    gameState.rivalryMonths = 0;
+
     // 初始化遗忘追踪
     for (const auto& dim : KNOWLEDGE_DIMS) {
         gameState.lastStudyMonth[dim] = 1;
@@ -254,14 +260,19 @@ inline void settleMonth(bool hasContest) {
     gameState.money += income;
     fact(SettlementFact::Cat::Economy, "零花钱 +" + std::to_string(income));
 
-    // 6. 焦虑检查（熬夜放大焦虑概率）
+    // 6. 焦虑检查（熬夜放大焦虑概率；挚友「心态锚」减免）
     const double aoYeMult = gameState.isAoYe ? 1.3 : 1.0;
+    double moodAnchorMult = 1.0;
+    for (const auto& c : gameState.companions)
+        if (!c.gone && c.relation >= 40 && c.perkId == (int)SocialPerk::MoodAnchor)
+            moodAnchorMult = 0.85;
     if (gameState.mood < 4) {
         gameState.anxietyMonths++;
         if (gameState.anxietyMonths >= 2 && !gameState.isAnxious) {
             double anxietyProb = 0.3 * DIFFICULTY_SETTINGS.at(gameState.gameDifficulty).anxietyMultiplier;
             anxietyProb *= gameState.anxietyMultiplier;
             anxietyProb *= aoYeMult;
+            anxietyProb *= moodAnchorMult;
             if (Utils::randomBool(anxietyProb)) {
                 gameState.isAnxious = true;
                 applyStatDelta("mood", -2, "焦虑发作");
@@ -345,11 +356,12 @@ inline void recordExamScore(int score, int maxScore, bool isGaokao) {
     gameState.examRecords.push_back(rec);
 }
 
-// 获取学习效率（含焦虑影响；钢铁意志特质免疫焦虑惩罚）
+// 获取学习效率（焦虑惩罚可被「钢铁意志」免疫；「知耻后勇」提供临时增益）
 inline double getStudyEfficiency() {
     double eff = getMoodEfficiency();
     eff *= gameState.efficiencyMultiplier;
     if (gameState.isAnxious && !playerHasTrait("iron_will")) eff *= 0.7;
+    if (gameState.rivalryMonths > 0) eff *= 1.1;   // 输给宿敌后的知耻后勇
     return std::max(0.3, std::min(1.5, eff));
 }
 

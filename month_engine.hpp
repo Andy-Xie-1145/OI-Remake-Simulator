@@ -22,6 +22,7 @@
 #include "talents.hpp"
 #include "topics.hpp"
 #include "ending.hpp"
+#include "social.hpp"
 
 #include <algorithm>
 #include <string>
@@ -102,6 +103,7 @@ inline void startNewGame() {
     hardReset();
     state::monthInfo_ = Calendar::getMonthInfo(1);
     Calendar::startMonth(1);
+    Social::generateRoster();   // 随机生成 3 位机房伙伴与宿敌
     logEvent("高中生活开始了！第1年7月", "event");
 }
 
@@ -170,6 +172,7 @@ inline ActivityOutcome doActivity(Activity::Type type, int param = 0) {
     // 活动后的引擎侧记账
     if (type == Activity::Learn) Topics::onLearn(param);
     if (type == Activity::Exercise) gameState.exerciseCountThisMonth++;
+    if (type == Activity::SummerCamp) Social::adjustCoach(+5);   // 参训：教练关系 +5
 
     if (out.activity.startContest) {
         state::contestIsActivity_ = true;
@@ -222,10 +225,12 @@ inline bool buyShopItem(const EventOption& opt) {
 
 // ============================ 比赛 / 考试收尾 ============================
 
-// 官方（正式）比赛结算：奖金一次性入账。产生比赛结果的唯一入口。
+// 官方（正式）比赛结算：奖金入账、教练关系、宿敌对比。产生比赛结果的唯一入口。
 inline Contest::ContestResultView finalizeCurrentContest() {
     Contest::ContestResultView view = Contest::finalize();
     gameState.money += view.prizeMoney;
+    if (view.hasAward) Social::adjustCoach(+10);   // 获奖：教练关系 +10
+    Social::onOfficialContestFinished(view);       // 宿敌对比播报与胜负结算
     state::contestIsActivity_ = false;
     return view;
 }
@@ -263,6 +268,9 @@ inline void endMonthActions() {
     const bool hasContest = !state::monthInfo_.contestIds.empty();
     settleMonth(hasContest);   // 每月恰好一次
     Topics::onMonthEnd();      // 专题逾期判定（结算事实追加在末尾）
+    Social::onMonthEnd();      // 知耻后勇递减 + 随机伙伴事件
+    if (!gameState.playerStats.isBaosong && gameState.playerStats.culture < 6)
+        Social::adjustCoach(-2);   // 文化课薄弱：教练关系 -2
 
     if (gameState.health <= 0) {
         setGameOver("你的身体撑不住了...健康归零。");
@@ -306,6 +314,7 @@ inline void phaseFinished() {
     const int newYear = monthToYear(nextMonth);
     if (oldYear != newYear) {
         applyYearTransition(oldYear, newYear);
+        Social::onYearTransition(newYear);   // 倾诉重置 + 高三伙伴扰动
     }
 
     state::monthInfo_ = Calendar::getMonthInfo(nextMonth);

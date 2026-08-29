@@ -3,6 +3,7 @@
 
 #include "game.hpp"
 #include "topics.hpp"
+#include "social.hpp"
 #include <cstdint>
 
 namespace Contest {
@@ -354,7 +355,7 @@ inline void triggerRandomEvent(int problemIdx, int subProblemIdx) {
                 return !gameState.lastActions.empty() && gameState.lastActions.back() == "think" &&
                     cs.thinkProgress > thinkTime / 2;
             },
-            0.03,
+            0.03 + (Social::hasFriendPerk(SocialPerk::Inspiration) ? 0.01 : 0.0),
             "灵光一闪", "突然想到了一个好方法！", "心态值+1",
             [&]() { applyStatDelta("mood", 1, "灵光一闪"); }
         },
@@ -363,7 +364,7 @@ inline void triggerRandomEvent(int problemIdx, int subProblemIdx) {
                 return lastNAre(gameState.lastActions, 2, "code") &&
                     cs.codeProgress > codeTime / 2;
             },
-            0.03 * (1.0 - luckReduction),
+            0.03 * (1.0 - luckReduction) * (Social::hasFriendPerk(SocialPerk::CodeReview) ? 0.7 : 1.0),
             "代码bug", "写着写着发现之前的代码有问题...", "代码进度-1",
             [&]() { cs.codeProgress = std::max(0, cs.codeProgress - 1); }
         },
@@ -553,7 +554,9 @@ inline void check(int problemIdx, int subProblemIdx) {
 
 inline void modify(int problemIdx, int subProblemIdx) {
     const SubProblem& sp = gameState.subProblems[problemIdx][subProblemIdx];
-    const int requiredFixes = sp.branch + 1;
+    // 错题本精通（伙伴挚友效果）：修改所需次数 -1，下限 1
+    const int requiredFixes = std::max(1, sp.branch + 1 -
+        (Social::hasFriendPerk(SocialPerk::Notebook) ? 1 : 0));
     auto& state = gameState.contestStates[problemIdx][subProblemIdx];
 
     if (!state.requiresCodeModification) {
