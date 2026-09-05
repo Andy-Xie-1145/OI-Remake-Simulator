@@ -45,13 +45,12 @@ output/
 build/
 cmake-build-*/
 
-# IDE / AI 上下文（本地文件，不入库）
+# IDE
 .vs/
 .vscode/
 .claude/
 *.claude
 CLAUDE.md
-CONTEXT.md
 .trae/
 imgui.ini
 *.suo
