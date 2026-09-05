@@ -125,7 +125,8 @@ inline const char* tierName(int t) {
     return t == 2 ? "知己" : (t == 1 ? "挚友" : "同学");
 }
 
-// 「机房闲聊」：关系成长 + 小增益 + 知己倾诉；返回日志
+// 「机房闲聊」：关系成长 + 30% 小增益；返回日志
+// （「倾诉」已改为独立按钮 vent()，不再随闲聊自动触发）
 inline std::vector<std::string> chat(int companionIndex) {
     std::vector<std::string> logs;
     if (companionIndex < 0 || companionIndex >= (int)gameState.companions.size())
@@ -156,15 +157,21 @@ inline std::vector<std::string> chat(int companionIndex) {
             logs.push_back("聊得很投机，但没聊出什么干货");
         }
     }
-
-    // 知己「倾诉」：焦虑状态下自动触发，每学年一次
-    if (gameState.isAnxious && c.relation >= REL_CONFIDANT && !c.ventUsedThisYear) {
-        gameState.isAnxious = false;
-        gameState.anxietyMonths = 0;
-        c.ventUsedThisYear = true;
-        logs.push_back("你向 " + c.name + " 倾诉了最近的压力……焦虑消散了。（本学年倾诉已使用）");
-    }
     return logs;
+}
+
+// 「倾诉」：知己专属，焦虑状态下清空焦虑（0 AP，每学年一次）。返回是否成功。
+inline bool vent(int companionIndex) {
+    if (companionIndex < 0 || companionIndex >= (int)gameState.companions.size())
+        return false;
+    auto& c = gameState.companions[companionIndex];
+    if (c.gone || c.relation < REL_CONFIDANT || c.ventUsedThisYear || !gameState.isAnxious)
+        return false;
+    gameState.isAnxious = false;
+    gameState.anxietyMonths = 0;
+    c.ventUsedThisYear = true;
+    logEvent("你向 " + c.name + " 倾诉了最近的压力……焦虑消散了。（本学年倾诉已使用）", "event");
+    return true;
 }
 
 // ---------- 教练 ----------

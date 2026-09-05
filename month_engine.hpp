@@ -225,12 +225,16 @@ inline bool buyShopItem(const EventOption& opt) {
 
 // ============================ 比赛 / 考试收尾 ============================
 
-// 官方（正式）比赛结算：奖金入账、教练关系、宿敌对比。产生比赛结果的唯一入口。
+// 比赛（正式/活动）结算的唯一入口：奖金入账；正式赛额外结算教练关系与宿敌对比。
+// 活动比赛（网赛/刷题/自定义）不触发宿敌与教练逻辑。
 inline Contest::ContestResultView finalizeCurrentContest() {
+    const bool wasActivity = state::contestIsActivity_;
     Contest::ContestResultView view = Contest::finalize();
     gameState.money += view.prizeMoney;
-    if (view.hasAward) Social::adjustCoach(+10);   // 获奖：教练关系 +10
-    Social::onOfficialContestFinished(view);       // 宿敌对比播报与胜负结算
+    if (!wasActivity) {
+        if (view.hasAward) Social::adjustCoach(+10);   // 获奖：教练关系 +10
+        Social::onOfficialContestFinished(view);       // 宿敌对比播报与胜负结算
+    }
     state::contestIsActivity_ = false;
     return view;
 }

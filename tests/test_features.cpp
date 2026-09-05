@@ -37,6 +37,47 @@ TEST_CASE("topic - 已精通的专题不可再次接受（防重复刷取）", "
 
 // ============================ A · 机房伙伴与宿敌 ============================
 
+TEST_CASE("topic - 手速特训：每场活动比赛恰好 +1，且接受后才开始计数", "[topics]")
+{
+    Utils::setSeed(21);
+    freshGame();
+    gameState.ap = 99;   // 预算充足，专注验证计数规则
+
+    // 接受前先打一场——不得计入
+    auto pre = Engine::doActivity(Activity::MockContest, 0);
+    REQUIRE(pre.activity.startContest);
+    Engine::activityContestFinished(50);       // 模拟打完（actualTotal=50）
+    CHECK_FALSE(Topics::active());
+
+    // 接受后进度从 0 开始，每场恰好 +1
+    REQUIRE(Topics::accept(9));
+    REQUIRE(gameState.topicProgress == 0);
+    for (int i = 1; i <= 4; ++i)
+    {
+        auto out = Engine::doActivity(Activity::MockContest, 0);
+        REQUIRE(out.activity.startContest);
+        Engine::activityContestFinished(50);
+        if (i < 4) {
+            CHECK(gameState.topicProgress == i);
+            CHECK(Topics::active() != nullptr);
+        }
+    }
+    CHECK(gameState.topicProgress == 4);
+    CHECK(Topics::active() == nullptr);        // 恰好在第 4 场完成
+    CHECK(Topics::hasMastery(9));
+}
+
+TEST_CASE("topic - 细心打磨：不再回溯历史对拍（接受后从 0 计数）", "[topics]")
+{
+    Utils::setSeed(21);
+    freshGame();
+    gameState.carefulChecks = 99;              // 历史对拍再多也不回溯
+
+    REQUIRE(Topics::accept(10));
+    CHECK(gameState.topicProgress == 0);
+    CHECK(Topics::active() != nullptr);        // 不再凭历史秒完成
+}
+
 TEST_CASE("social - 开局生成：3 位伙伴姓名/专精/效果互异", "[social]")
 {
     Utils::setSeed(33);
@@ -95,7 +136,7 @@ TEST_CASE("social - 闲聊：关系成长与挚友效果生效", "[social]")
     CHECK_FALSE(Social::hasFriendPerk((SocialPerk)perkId));
 }
 
-TEST_CASE("social - 知己倾诉：清焦虑且每学年一次", "[social]")
+TEST_CASE("social - 知己倾诉：独立动作，清焦虑且每学年一次", "[social]")
 {
     Utils::setSeed(5);
     freshGame();
@@ -103,23 +144,16 @@ TEST_CASE("social - 知己倾诉：清焦虑且每学年一次", "[social]")
     c.relation = Social::REL_CONFIDANT;   // 知己
     gameState.isAnxious = true;
     gameState.anxietyMonths = 2;
+    const int apBefore = gameState.ap;
 
-    auto out = Engine::doActivity(Activity::Socialize, 0);
-    REQUIRE(out.ok);
-    bool vented = false;
-    for (const auto& lg : out.activity.logs)
-        if (lg.find("倾诉") != std::string::npos) vented = true;
-    CHECK(vented);
+    CHECK(Social::vent(0));                       // 首次倾诉成功
     CHECK_FALSE(gameState.isAnxious);
     CHECK(c.ventUsedThisYear);
+    CHECK(gameState.ap == apBefore);              // 倾诉不消耗 AP
 
-    // 再次焦虑后本学年无法倾诉
+    // 本学年已用 → 失败
     gameState.isAnxious = true;
-    out = Engine::doActivity(Activity::Socialize, 0);
-    vented = false;
-    for (const auto& lg : out.activity.logs)
-        if (lg.find("倾诉") != std::string::npos) vented = true;
-    CHECK_FALSE(vented);
+    CHECK_FALSE(Social::vent(0));
     CHECK(gameState.isAnxious);
 
     // 学年过渡重置
@@ -483,15 +517,7 @@ TEST_CASE("topic - 逾期未完成为失败（关闭专题并留下事实）", "
     CHECK(hasFailFact);
 }
 
-TEST_CASE("topic - 细心专题凭历史对拍直接完成", "[topics]")
-{
-    Utils::setSeed(7);
-    freshGame();
-    gameState.carefulChecks = 10;
-    Topics::accept(10);
-    CHECK(Topics::active() == nullptr);
-    CHECK(Topics::hasMastery(10));
-}
+// （旧测试「细心专题凭历史对拍直接完成」已随全局计数移除而删除）
 
 // ============================ E · 生活节奏 ============================
 

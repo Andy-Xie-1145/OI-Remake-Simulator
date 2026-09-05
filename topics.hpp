@@ -43,8 +43,8 @@ inline const std::vector<TopicDef> ALL = {
     {6,  Kind::Knowledge, 6, "几何专题",     "专攻计算几何"},
     {7,  Kind::Knowledge, 7, "高级数据结构专题", "专攻高级数据结构"},
     {8,  Kind::Knowledge, 8, "构造专题",     "专攻构造/思维"},
-    {9,  Kind::Speed,    -1, "手速特训",     "完成 4 场网赛/刷题/模拟赛"},
-    {10, Kind::Careful,  -1, "细心打磨",     "累计 6 次成功对拍/提交"},
+    {9,  Kind::Speed,    -1, "手速特训",     "接受后完成 4 场网赛/刷题/模拟赛"},
+    {10, Kind::Careful,  -1, "细心打磨",     "接受后累计 6 次成功对拍/提交"},
 };
 constexpr int CAREFUL_GOAL = 6;
 
@@ -63,23 +63,17 @@ inline const TopicDef* active() {
 }
 
 // 接受专题；已精通或已有进行中专题时拒绝（返回 false）
+// 进度一律从 0 开始计数——只有接受之后的匹配行动才计入（不回溯历史行为）
 inline bool accept(int id) {
     const TopicDef* d = byId(id);
     if (!d || active() || hasMastery(id)) return false;
     gameState.topicId = id;
     gameState.topicStartMonth = gameState.currentMonth;
-    gameState.topicProgress = (d->kind == Kind::Careful)
-        ? std::min(gameState.carefulChecks, CAREFUL_GOAL) : 0;
-    // 细心专题：历史对拍已达标 → 直接完成
-    if (d->kind == Kind::Careful && gameState.topicProgress >= CAREFUL_GOAL) {
-        gameState.masteredTopics.insert(d->id);
-        gameState.topicId = INVALID;
-        logEvent(std::string("凭借过往的对拍积累，直接完成专题：") + d->name +
-                 "！获得永久精通加成。", "event");
-        return true;
-    }
+    gameState.topicProgress = 0;
     logEvent(std::string("接受专题任务：") + d->name +
-             "（" + std::to_string(MONTHS_LIMIT) + " 个月内完成）", "event");
+             "（" + std::to_string(MONTHS_LIMIT) + " 个月内完成 " +
+             std::to_string(d->kind == Kind::Careful ? CAREFUL_GOAL : GOAL) +
+             " 次，进度从现在起计）", "event");
     return true;
 }
 

@@ -6,6 +6,7 @@
 #include "culture_exam.hpp"
 #include "month_engine.hpp"
 #include "save_system.hpp"
+#include "changelog_data.hpp"
 #include "imgui.h"
 #include "imgui_impl_dx11.h"
 #include "imgui_impl_win32.h"
@@ -50,6 +51,7 @@ namespace
         Difficulty,
         IntroStory,
         Help,
+        Changelog,
         Talent,
         MonthAction,
         MonthSettlement,
@@ -59,7 +61,7 @@ namespace
         GameOver
     };
 
-    constexpr const char *kGameVersion = "v0.4.0-beta";
+    constexpr const char *kGameVersion = "v0.4.0-beta.2";
     constexpr const char *kIntroStoryText =
         "我重生了？\n"
         "参加完省队选拔后，你意识到自己无缘省队了。也许从此就和 OI 无缘了。\n\n"
@@ -339,12 +341,14 @@ namespace
         void SetGameOver(std::string reason);
         void CheckAndShowContestNotice(char preferredAction);
         void OpenHelp();
+        void OpenChangelog();
 
         void RenderTopBar();
         void RenderHome();
         void RenderDifficulty();
         void RenderIntroStory();
         void RenderHelp();
+        void RenderChangelog();
         void RenderTalent();
         void RenderMonthAction();
         void RenderMonthSettlement();
@@ -455,6 +459,14 @@ namespace
             return;
         helpReturnScreen_ = screen_;
         screen_ = GuiScreen::Help;
+    }
+
+    void GuiApp::OpenChangelog()
+    {
+        if (screen_ == GuiScreen::Changelog)
+            return;
+        helpReturnScreen_ = screen_;
+        screen_ = GuiScreen::Changelog;
     }
 
     // 按引擎给出的当前阶段同步屏幕（UI 不再自行决定「接下来是什么」）
@@ -691,6 +703,9 @@ namespace
         case GuiScreen::Help:
             RenderHelp();
             break;
+        case GuiScreen::Changelog:
+            RenderChangelog();
+            break;
         case GuiScreen::Talent:
             RenderTalent();
             break;
@@ -884,6 +899,12 @@ namespace
             }
         }
 
+        // 更新日志入口
+        ImGui::Spacing();
+        ImGui::SetCursorPosX((ww - btnWidth) * 0.5f);
+        if (ImGui::Button("更新日志", ImVec2(btnWidth, kSecondaryButtonHeight)))
+            OpenChangelog();
+
         ImGui::Spacing();
         ImGui::Spacing();
         const float hintW = ImGui::CalcTextSize("按").x + 6 + ImGui::CalcTextSize("F1").x + 16 + 6 + ImGui::CalcTextSize("可随时查看帮助").x;
@@ -1044,6 +1065,60 @@ namespace
                     ImGui::BulletText("%s", section.items[j]);
             }
         }
+        ImGui::Spacing();
+        if (ImGui::Button("返回上一页", ImVec2(kSecondaryButtonWidth, kSecondaryButtonHeight)))
+        {
+            screen_ = helpReturnScreen_;
+        }
+    }
+
+    void GuiApp::RenderChangelog()
+    {
+        RenderPageHeader("更新日志", "每个版本的变化都记录在这里，当前安装版本会高亮标注。");
+
+        if (OIWidgets::BeginCard("changelog_card", ImVec2(0, 0)))
+        {
+            const float footerH = kSecondaryButtonHeight + 16.0f;
+            ImGui::BeginChild("cl_scroll", ImVec2(0.0f, ImGui::GetContentRegionAvail().y - footerH), false);
+
+            for (const auto &e : ChangeLog::ENTRIES)
+            {
+                const bool isCurrent = (kGameVersion == e.version);
+                OIWidgets::Tag(e.version,
+                               isCurrent ? OITheme::Col::Teal
+                                         : (e.prerelease ? OITheme::Col::Warn : OITheme::Col::TxtDim));
+                if (isCurrent)
+                {
+                    ImGui::SameLine(0, 6);
+                    OIWidgets::Tag("当前版本", OITheme::Col::Teal);
+                }
+                else if (e.prerelease)
+                {
+                    ImGui::SameLine(0, 6);
+                    OIWidgets::Tag("Pre-release", OITheme::Col::Warn);
+                }
+                ImGui::SameLine(0, 10);
+                ImGui::PushStyleColor(ImGuiCol_Text, OITheme::Col::Txt);
+                ImGui::TextUnformatted(e.title);
+                ImGui::PopStyleColor();
+                ImGui::SameLine(0, 10);
+                ImGui::TextColored(OITheme::Col::TxtFaint, "%s", e.date);
+
+                ImGui::Spacing();
+                for (const char *item : e.items)
+                    ImGui::BulletText("%s", item);
+
+                ImGui::Spacing();
+                ImGui::PushStyleColor(ImGuiCol_Separator, OITheme::Col::Line);
+                ImGui::Separator();
+                ImGui::PopStyleColor();
+                ImGui::Spacing();
+            }
+
+            ImGui::EndChild();
+        }
+        OIWidgets::EndCard();
+
         ImGui::Spacing();
         if (ImGui::Button("返回上一页", ImVec2(kSecondaryButtonWidth, kSecondaryButtonHeight)))
         {
@@ -1222,6 +1297,29 @@ namespace
             ImGui::Text("%d / %d", gameState.ap, gameState.maxAp);
             ImGui::PopStyleColor();
             OIWidgets::ApPips(gameState.ap, gameState.maxAp, 14.0f, 8.0f, 3.0f);
+
+            // —— AP 构成明细：解释本月 AP 为什么变少 ——
+            {
+                const int deduct = Engine::monthInfo().apDeduction;
+                const int apBonus = DIFFICULTY_SETTINGS.at(gameState.gameDifficulty).apBonus;
+                const int base = 8 + (gameState.isTingke ? 2 : 0) + (gameState.isAoYe ? 2 : 0) + apBonus;
+                std::string formula = "基础 " + std::to_string(base - apBonus) +
+                                      (gameState.isTingke ? " + 停课2" : "") +
+                                      (gameState.isAoYe ? " + 熬夜2" : "") +
+                                      (apBonus > 0 ? " + 难度" + std::to_string(apBonus)
+                                                   : (apBonus < 0 ? " − 难度" + std::to_string(-apBonus) : "")) +
+                                      (deduct > 0 ? " − 赛事/考试 " + std::to_string(deduct) : "");
+                ImGui::PushStyleColor(ImGuiCol_Text, OITheme::Col::TxtFaint);
+                ImGui::TextUnformatted(formula.c_str());
+                ImGui::PopStyleColor();
+                if (deduct > 0)
+                {
+                    ImGui::PushStyleColor(ImGuiCol_Text, OITheme::Col::Warn);
+                    ImGui::TextWrapped("本月有赛事/考试：行动力已预先扣除 %d 点，且活动结束后将自动进入比赛。",
+                                       deduct);
+                    ImGui::PopStyleColor();
+                }
+            }
             ImGui::EndGroup();
         }
         OIWidgets::EndCard();
@@ -1364,6 +1462,16 @@ namespace
                 else
                 {
                     ImGui::TextColored(OITheme::Col::TxtFaint, "挚友效果 ???（关系 ≥40 揭示）");
+                }
+
+                // 倾诉按钮：知己 + 焦虑中 + 本学年未用（0 AP，独立于闲聊）
+                if (tier >= 2 && gameState.isAnxious && !c.ventUsedThisYear)
+                {
+                    ImGui::SameLine(0, 12);
+                    if (ImGui::SmallButton("倾诉"))
+                        Social::vent(i);
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("向知己倾诉：清除焦虑（0 AP，每学年一次）");
                 }
 
                 ImGui::SameLine(0, 12);
